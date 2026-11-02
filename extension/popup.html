@@ -36,6 +36,12 @@
           <button data-filter="all">All</button>
         </div>
       </div>
+      <div id="select-bar" hidden>
+        <span id="select-count"></span>
+        <span class="spacer"></span>
+        <button id="sel-clear" class="ghost" title="Clear selection">Clear</button>
+        <button id="sel-open" class="primary" title="Open selected posts in background tabs (Shift+O)">Open all</button>
+      </div>
       <button id="new-pill" hidden>New posts</button>
       <div id="list-scroll">
         <ul id="post-list"></ul>
@@ -149,6 +155,8 @@
       <span><kbd>s</kbd></span><span>Star / unstar</span>
       <span><kbd>f</kbd></span><span>Load full article</span>
       <span><kbd>c</kbd></span><span>Copy post link</span>
+      <span>Middle-click / <kbd>Ctrl</kbd>+click, or <kbd>x</kbd></span><span>Select post to open later</span>
+      <span><kbd>Shift</kbd>+<kbd>O</kbd></span><span>Open all selected posts in background tabs</span>
       <span><kbd>Shift</kbd>+<kbd>A</kbd></span><span>Mark all in view as read</span>
       <span><kbd>u</kbd></span><span>Toggle unread only / all</span>
       <span><kbd>Shift</kbd>+<kbd>J</kbd> / <kbd>K</kbd></span><span>Next / previous feed</span>

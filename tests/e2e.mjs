@@ -303,6 +303,67 @@ await step('mark all as read in a view', async () => {
   await until(async () => (await page.evaluate(async (id) => (await import('/lib/db.js')).getUnreadCounts([id]), F['JSON Feed Example'].id))[F['JSON Feed Example'].id] === 0, { msg: 'mark all read' });
 });
 
+await step('middle-click selects posts, then "Open all" opens them in background tabs', async () => {
+  await fetch(`${B}/dynamic/add?title=${encodeURIComponent('Third dynamic post')}`);
+  await msg('refresh', { feedIds: [F['Dynamic Feed'].id], force: false });
+  await page.reload();
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'Dynamic Feed' }).click();
+  await page.locator('.seg button[data-filter="all"]').click();
+  const rows = page.locator('#post-list li');
+  await until(async () => (await rows.count()) >= 3, { msg: 'dynamic posts' });
+  const ids = await rows.evaluateAll((els) => els.map((el) => el.dataset.id));
+  await rows.nth(0).click({ button: 'middle' });
+  await rows.nth(1).click({ button: 'middle' });
+  assert.equal(await page.locator('#select-count').innerText(), '2 selected');
+  assert.equal(await page.locator('#post-list li.selected').count(), 2);
+  assert.equal(await page.locator('#article-pane .article').count(), 0, 'middle-click should not open the article');
+
+  // Toggle off/on, and Ctrl+click also selects.
+  await rows.nth(1).click({ button: 'middle' });
+  assert.equal(await page.locator('#select-count').innerText(), '1 selected');
+  await rows.nth(1).click({ button: 'middle' });
+  await rows.nth(2).click({ modifiers: ['Control'] });
+  assert.equal(await page.locator('#select-count').innerText(), '3 selected');
+  await rows.nth(2).click({ modifiers: ['Control'] });
+
+  // Survives closing/reopening the reader (e.g. the popup closing).
+  await page.reload();
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'Dynamic Feed' }).click();
+  await page.locator('.seg button[data-filter="all"]').click();
+  await until(async () => (await page.locator('#post-list li.selected').count()) === 2, { msg: 'selection restored' });
+  assert.equal(await page.locator('#sel-open').innerText(), 'Open 2 posts');
+
+  const opened = [];
+  const onPage = (p) => opened.push(p);
+  ctx.on('page', onPage);
+  await page.locator('#sel-open').click();
+  await until(() => opened.length === 2, { msg: 'two tabs opened' });
+  ctx.off('page', onPage);
+  await until(async () => opened.every((p) => p.url().includes('/article.html?')), { msg: 'tab urls' });
+  const urls = opened.map((p) => p.url());
+  const links = await page.evaluate(async (ids) => {
+    const db = await import('/lib/db.js');
+    return Promise.all(ids.map(async (id) => (await db.getPost(id)).link));
+  }, ids.slice(0, 2));
+  assert.deepEqual(urls, links, 'tabs should open in list order');
+  for (const p of opened) await p.close();
+  await page.bringToFront();
+  assert.equal(await page.locator('#select-bar').isVisible(), false);
+  const reads = await page.evaluate(async (ids) => {
+    const db = await import('/lib/db.js');
+    return Promise.all(ids.map(async (id) => (await db.getPost(id)).read));
+  }, ids.slice(0, 2));
+  assert.deepEqual(reads, [1, 1]);
+
+  // Keyboard: x selects the open post, Shift+O opens the batch.
+  await rows.nth(2).click();
+  await page.keyboard.press('x');
+  assert.equal(await page.locator('#select-count').innerText(), '1 selected');
+  const [tab] = await Promise.all([ctx.waitForEvent('page'), page.keyboard.press('Shift+O')]);
+  await tab.close();
+  await page.bringToFront();
+});
+
 await step('screenshots', async () => {
   if (!wantShots) return;
   await page.locator('#sidebar .nav-item', { hasText: 'All articles' }).click();

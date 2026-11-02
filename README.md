@@ -17,6 +17,7 @@ Tributary is a browser-extension RSS reader with the features you'd normally pay
 - Podcast/video enclosures play inline; images, thumbnails, light/dark/system theme, font size, serif/sans, compact list
 - Keyboard shortcuts (`j`/`k`, `o`, `m`, `s`, `f`, `Shift+A`, `/`, `?` …) and a global shortcut to open the popup (`Alt+Shift+R`)
 - Mark read on open or on scroll; "mark all as read" per feed, folder, search or everything
+- **Batch open**: middle-click (or Ctrl/⌘-click, or `x`) posts to select them, then *Open all* (`Shift+O`) opens them as background tabs in list order and marks them read. The selection survives the popup closing.
 
 **Feeds**
 - RSS 2.0/0.9x, RSS 1.0 (RDF), Atom and JSON Feed; tolerant of malformed XML and non-UTF-8 encodings

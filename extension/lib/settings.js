@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS = {
   pageIndicator: true,        // change toolbar icon when the current page has a feed
   syncSubscriptions: true,    // mirror subscriptions & rules to chrome.storage.sync
   markAllConfirm: true,
+  middleClick: 'select',      // select | open  (middle-click on a post in the list)
 };
 
 export async function getSettings() {

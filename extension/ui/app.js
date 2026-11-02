@@ -35,6 +35,7 @@ const state = {
   sidebarHidden: false,
   refreshing: false,
   fullArticle: new Map(), // postId -> 'loading' | {html} | {error}
+  selected: new Map(),    // postId -> {id, link}; posts queued to open together (kept in session storage)
 };
 
 // ---------------------------------------------------------------------------
@@ -222,8 +223,9 @@ async function selectView(view) {
 function postRow(p) {
   const feed = feedById(p.feedId);
   const showThumb = state.settings.showImages && state.settings.showThumbnails && p.image;
-  const cls = ['post', p.read ? '' : 'unread', p.highlight ? 'highlight' : '', p.id === state.current ? 'active' : ''].join(' ');
+  const cls = ['post', p.read ? '' : 'unread', p.highlight ? 'highlight' : '', p.id === state.current ? 'active' : '', state.selected.has(p.id) ? 'selected' : ''].join(' ');
   return `<li class="${cls}" data-id="${escapeHtml(p.id)}">
+    <span class="sel-mark">${icon('check')}</span>
     <span class="dot"></span>
     <div class="body">
       <div class="meta">${iconImg(feed)}<span class="feed-name">${escapeHtml(feedTitle(feed))}</span><span>·</span><span title="${escapeHtml(formatDate(p.published))}">${escapeHtml(timeAgo(p.published))}</span></div>
@@ -274,7 +276,62 @@ function updatePostRow(p) {
   li.classList.toggle('unread', !p.read);
   li.classList.toggle('highlight', !!p.highlight);
   li.classList.toggle('active', p.id === state.current);
+  li.classList.toggle('selected', state.selected.has(p.id));
   $('.star-btn', li)?.classList.toggle('on', !!p.starred);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-select: queue posts (middle-click / Ctrl+click / x), then open them all at once
+// ---------------------------------------------------------------------------
+
+async function loadSelection() {
+  try {
+    const { selected = [] } = await chrome.storage.session.get('selected');
+    state.selected = new Map(selected.map((s) => [s.id, s]));
+  } catch { state.selected = new Map(); }
+  renderSelectBar();
+}
+
+function saveSelection() {
+  chrome.storage.session.set({ selected: [...state.selected.values()] }).catch(() => {});
+}
+
+function renderSelectBar() {
+  const n = state.selected.size;
+  $('#select-bar').hidden = n === 0;
+  $('#select-count').textContent = `${n} selected`;
+  $('#sel-open').textContent = n === 1 ? 'Open 1 post' : `Open ${n} posts`;
+}
+
+function toggleSelect(id) {
+  const p = state.posts.find((x) => x.id === id);
+  if (!p) return;
+  if (state.selected.has(id)) state.selected.delete(id);
+  else if (!p.link) { toast('This post has no link to open'); return; }
+  else state.selected.set(id, { id, link: p.link });
+  updatePostRow(p);
+  saveSelection();
+  renderSelectBar();
+}
+
+function clearSelection() {
+  const ids = [...state.selected.keys()];
+  state.selected.clear();
+  for (const id of ids) { const p = state.posts.find((x) => x.id === id); if (p) updatePostRow(p); }
+  saveSelection();
+  renderSelectBar();
+}
+
+async function openSelected() {
+  // Open in the order the posts appear in the list; anything selected in another view goes last.
+  const order = new Map(state.posts.map((p, i) => [p.id, i]));
+  const items = [...state.selected.values()].sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+  if (!items.length) return;
+  if (items.length > 20 && !(await confirmDialog(`Open ${items.length} tabs at once?`, { ok: `Open ${items.length} tabs` }))) return;
+  for (const it of items) await chrome.tabs.create({ url: it.link, active: false });
+  clearSelection();
+  await markRead(items.map((it) => it.id), true);
+  toast(`Opened ${items.length} tab${items.length === 1 ? '' : 's'}`);
 }
 
 let scrollObserver = null;
@@ -890,14 +947,36 @@ function bindEvents() {
     const star = e.target.closest('[data-star]');
     if (star) { e.stopPropagation(); return toggleStar(star.dataset.star); }
     const li = e.target.closest('li[data-id]');
+    if (li && (e.ctrlKey || e.metaKey)) { e.preventDefault(); return toggleSelect(li.dataset.id); }
     if (li) return openPost(li.dataset.id, { scroll: false });
     return undefined;
+  });
+  // Prevent the middle-button autoscroll cursor on the list.
+  $('#post-list').addEventListener('mousedown', (e) => {
+    if (e.button === 1 && e.target.closest('li[data-id]')) e.preventDefault();
   });
   $('#post-list').addEventListener('auxclick', (e) => {
     const li = e.target.closest('li[data-id]');
     if (e.button !== 1 || !li) return;
-    const p = state.posts.find((x) => x.id === li.dataset.id);
-    if (p?.link) { openLink(p.link, { active: false }); markRead([p.id], true); }
+    e.preventDefault();
+    if (state.settings.middleClick === 'open') {
+      const p = state.posts.find((x) => x.id === li.dataset.id);
+      if (p?.link) { openLink(p.link, { active: false }); markRead([p.id], true); }
+    } else {
+      toggleSelect(li.dataset.id);
+    }
+  });
+  $('#sel-open').addEventListener('click', openSelected);
+  $('#sel-clear').addEventListener('click', clearSelection);
+  chrome.storage.onChanged.addListener((changes, area) => {
+    // Keep popup and tab reader in step when both are open.
+    if (area !== 'session' || !changes.selected) return;
+    const next = new Map((changes.selected.newValue || []).map((s) => [s.id, s]));
+    const same = next.size === state.selected.size && [...next.keys()].every((k) => state.selected.has(k));
+    if (same) return;
+    state.selected = next;
+    state.posts.forEach(updatePostRow);
+    renderSelectBar();
   });
   $('#list-footer').addEventListener('click', async (e) => {
     if (e.target.closest('#load-more')) return loadPosts({ append: true });
@@ -1056,6 +1135,8 @@ function onKey(e) {
     j: () => move(1), k: () => move(-1), n: () => move(1), p: () => move(-1),
     J: () => moveFeed(1), K: () => moveFeed(-1),
     o: () => p && openLink(p.link), Enter: () => p && openLink(p.link), v: () => p && openLink(p.link, { active: true }),
+    x: () => p && toggleSelect(p.id),
+    O: () => openSelected(),
     m: () => p && markRead([p.id], !p.read),
     s: () => p && toggleStar(p.id),
     f: () => p && loadFullArticle(p.id),
@@ -1102,6 +1183,7 @@ async function init() {
   applyTheme(state.settings);
   state.filter = state.settings.unreadOnly ? 'unread' : 'all';
   bindEvents();
+  await loadSelection();
   await loadFeeds();
   await loadPosts();
   renderArticle();
