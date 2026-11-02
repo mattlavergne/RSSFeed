@@ -36,19 +36,32 @@ Tributary is a browser-extension RSS reader with the features you'd normally pay
 
 **Privacy**: no analytics, no accounts, no servers. Feeds are fetched directly from your browser and stored locally in IndexedDB. See [PRIVACY.md](PRIVACY.md).
 
-## Install it yourself (2 minutes, no store needed)
+## Install (personal use — no store, no fee)
 
-1. Download this repository (green **Code** button → *Download ZIP*, then unzip) or `git clone` it.
-2. Open `chrome://extensions` in Chrome (or `edge://extensions` in Edge, `brave://extensions` in Brave).
-3. Turn on **Developer mode** (top-right).
-4. Click **Load unpacked** and select the **`extension`** folder inside this repo.
-5. Pin Tributary from the puzzle-piece menu so the icon stays in your toolbar.
+1. Get the code onto your computer: `git clone` this repo, or on GitHub use **Code → Download ZIP** and unzip it.
+   Put it somewhere permanent (e.g. `Documents/Tributary`) — Chrome loads the extension from that folder every time it starts.
+2. Open `chrome://extensions` (also works in Edge `edge://extensions` and Brave `brave://extensions`).
+3. Turn on **Developer mode** (toggle, top-right).
+4. Click **Load unpacked** and select the **`extension`** folder inside the repo.
+5. Click the puzzle-piece icon in the toolbar and **pin** Tributary.
 
-To update after pulling new code, click the ↻ reload button on Tributary's card in `chrome://extensions`. Your data is kept.
+That's it. It keeps working across browser restarts, and refreshes feeds in the background whenever Chrome is open.
 
-## Publishing to the Chrome Web Store
+**Moving from another reader:** export OPML there, then Tributary → ⚙ Settings → *Import & export* → drop the file in.
 
-See **[docs/PUBLISHING.md](docs/PUBLISHING.md)** — a step-by-step guide including store-listing text, permission justifications and privacy answers you can paste in.
+**Updating:** `git pull` (or download the ZIP again into the **same** folder), then click ↻ on Tributary's card in `chrome://extensions`. Your feeds and posts are kept.
+
+**Several computers:** install it the same way on each. The extension ID is pinned in `manifest.json` (`key`), so it's identical everywhere regardless of folder path — that's what lets *Settings → Sync* share your subscriptions, folders and rules through your Chrome profile. Read/unread state is per computer.
+
+**Back up occasionally:** *Settings → Import & export → Export backup*. Data lives in your Chrome profile; removing the extension deletes it.
+
+### Good to know about unpacked extensions
+- Don't delete or rename the folder — Chrome will disable the extension (re-load it and your data comes back, since the ID is pinned).
+- Updates are manual (above); nothing auto-updates.
+- Work/school-managed Chromebooks or browsers may block Developer mode. That's a policy on the machine, not something the extension can work around.
+
+### If you ever want to publish it
+Optional — see [docs/PUBLISHING.md](docs/PUBLISHING.md). An **unlisted** or **private** store listing is a middle ground: still the $5 one-time fee and review, but you get one-click installs and automatic updates on all your machines. `npm run package` strips the `key` field automatically, since the store assigns its own ID.
 
 ## Development
 

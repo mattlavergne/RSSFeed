@@ -4,6 +4,7 @@
   "short_name": "Tributary",
   "version": "1.0.0",
   "description": "A fast, private, fully free RSS/Atom/JSON Feed reader. No accounts, no limits, OPML import/export.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjoVm5X6Sz+Vbf4bSPBX2i69IpbRra4+/+Wjx7D9LJYr0a8hdXsDIJ8nPOvX9XmQmF1GUHP+NxhAQ8ROEkXEJsK8pSNe5yoNmL26fGQe02XUAG9NrVqI6y4LL/GGKgfkUHhhOlZ7LoqNDcld/bC3hl0xVnP3Ae/dStMiQ3oSvIG5/sfA79O+3sZxewXG0ZfIMGlezGGqReqC9vycPqy8So1+TMpbyRD04IunyP3rTDW+ow3zkDS5JvRn5+YVbZrhyIMkYXqNmuB0LqvJh6yp77cUzpdC0w7Kj5cFGmIUgV/nPGCxCVgitZssPnSccx75YtuxBq0ezee3vz2iGcTF5UwIDAQAB",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",
@@ -37,14 +38,20 @@
     "scripting",
     "favicon"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "commands": {
     "_execute_action": {
-      "suggested_key": { "default": "Alt+Shift+R" },
+      "suggested_key": {
+        "default": "Alt+Shift+R"
+      },
       "description": "Open the reader popup"
     },
     "open-reader-tab": {
-      "suggested_key": { "default": "Alt+Shift+T" },
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
       "description": "Open the reader in a full tab"
     },
     "refresh-all": {

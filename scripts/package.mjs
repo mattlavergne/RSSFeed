@@ -46,7 +46,12 @@ let offset = 0;
 const { time, date } = dosTime(new Date());
 
 for (const rel of files) {
-  const data = fs.readFileSync(path.join(src, rel));
+  let data = fs.readFileSync(path.join(src, rel));
+  if (rel === 'manifest.json') {
+    // "key" pins the ID for unpacked installs; the Web Store assigns its own and rejects uploads containing it.
+    const { key, ...rest } = JSON.parse(data);
+    data = Buffer.from(`${JSON.stringify(rest, null, 2)}\n`);
+  }
   const deflated = zlib.deflateRawSync(data, { level: 9 });
   const useDeflate = deflated.length < data.length;
   const body = useDeflate ? deflated : data;
