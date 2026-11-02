@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tributary — Settings</title>
+<link rel="icon" href="icons/icon32.png">
+<link rel="stylesheet" href="ui/options.css">
+<script type="module" src="ui/options.js"></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><img src="icons/icon48.png" alt=""><div><b>Tributary</b><div class="small muted" id="version"></div></div></div>
+    <nav id="tabs">
+      <a href="#general" data-tab="general">General</a>
+      <a href="#reading" data-tab="reading">Reading</a>
+      <a href="#feeds" data-tab="feeds">Feeds</a>
+      <a href="#rules" data-tab="rules">Filters &amp; alerts</a>
+      <a href="#import" data-tab="import">Import &amp; export</a>
+      <a href="#sync" data-tab="sync">Sync</a>
+      <a href="#about" data-tab="about">About</a>
+    </nav>
+    <button id="open-reader" class="primary">Open reader</button>
+  </aside>
+
+  <main>
+    <!-- GENERAL -->
+    <section id="tab-general" class="tab">
+      <h1>General</h1>
+      <div class="card">
+        <label class="setting"><span><b>Theme</b></span>
+          <select data-setting="theme"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+        <label class="setting"><span><b>Toolbar button opens</b><small>The popup is quick; a tab gives a three-pane layout.</small></span>
+          <select data-setting="openMode"><option value="popup">Popup</option><option value="tab">Reader in a tab</option></select></label>
+        <label class="setting"><span><b>Toolbar badge</b></span>
+          <select data-setting="badge"><option value="unread">Show unread count</option><option value="none">Hide</option></select></label>
+        <label class="setting"><span><b>Show when a page has a feed</b><small>Adds a dot to the toolbar icon on pages with RSS/Atom links.</small></span>
+          <input type="checkbox" data-setting="pageIndicator"></label>
+      </div>
+      <h2>Updates</h2>
+      <div class="card">
+        <label class="setting"><span><b>Check feeds every</b><small>Individual feeds can override this. Feeds that fail are retried with back-off.</small></span>
+          <select data-setting="refreshMinutes" data-type="number">
+            <option value="1">1 minute</option><option value="5">5 minutes</option><option value="10">10 minutes</option>
+            <option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option>
+            <option value="120">2 hours</option><option value="360">6 hours</option><option value="720">12 hours</option><option value="1440">1 day</option>
+          </select></label>
+        <label class="setting"><span><b>Desktop notifications for new posts</b><small>Per-feed notifications can be changed in each feed’s settings. Keyword alerts always notify.</small></span>
+          <input type="checkbox" data-setting="notifications"></label>
+      </div>
+      <h2>Storage</h2>
+      <div class="card">
+        <label class="setting"><span><b>Keep at most this many posts per feed</b><small>Starred posts are never removed.</small></span>
+          <input type="number" min="20" max="5000" step="10" data-setting="maxPostsPerFeed" data-type="number"></label>
+        <label class="setting"><span><b>Delete read posts after (days)</b><small>0 keeps them forever.</small></span>
+          <input type="number" min="0" max="3650" data-setting="keepReadDays" data-type="number"></label>
+        <div class="setting"><span><b>Delete everything</b><small>Removes all feeds, posts, folders, rules and settings on this device.</small></span>
+          <button id="wipe" class="danger">Delete all data…</button></div>
+      </div>
+    </section>
+
+    <!-- READING -->
+    <section id="tab-reading" class="tab">
+      <h1>Reading</h1>
+      <div class="card">
+        <label class="setting"><span><b>Show only unread posts by default</b></span><input type="checkbox" data-setting="unreadOnly"></label>
+        <label class="setting"><span><b>Sort order</b></span>
+          <select data-setting="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+        <label class="setting"><span><b>List density</b></span>
+          <select data-setting="density"><option value="comfortable">Comfortable (snippets &amp; thumbnails)</option><option value="compact">Compact (titles only)</option></select></label>
+        <label class="setting"><span><b>Show images in articles</b></span><input type="checkbox" data-setting="showImages"></label>
+        <label class="setting"><span><b>Show thumbnails in the list</b></span><input type="checkbox" data-setting="showThumbnails"></label>
+        <label class="setting"><span><b>Article text size</b></span>
+          <select data-setting="fontSize" data-type="number"><option value="14">Small</option><option value="16">Medium</option><option value="18">Large</option><option value="20">Extra large</option></select></label>
+        <label class="setting"><span><b>Article font</b></span>
+          <select data-setting="articleFont"><option value="sans">Sans-serif</option><option value="serif">Serif</option></select></label>
+      </div>
+      <h2>Behaviour</h2>
+      <div class="card">
+        <label class="setting"><span><b>Mark posts as read when opened</b></span><input type="checkbox" data-setting="markReadOnOpen"></label>
+        <label class="setting"><span><b>Mark posts as read when scrolled past</b></span><input type="checkbox" data-setting="markReadOnScroll"></label>
+        <label class="setting"><span><b>Open links in</b></span>
+          <select data-setting="linkTarget"><option value="background">A background tab</option><option value="foreground">A new active tab</option></select></label>
+        <label class="setting"><span><b>Confirm before “mark all as read”</b></span><input type="checkbox" data-setting="markAllConfirm"></label>
+      </div>
+    </section>
+
+    <!-- FEEDS -->
+    <section id="tab-feeds" class="tab">
+      <h1>Feeds</h1>
+      <div class="toolbar">
+        <input id="feed-filter" type="search" placeholder="Filter feeds…">
+        <select id="bulk-folder"><option value="">Move selected to…</option></select>
+        <button id="bulk-refresh">Refresh selected</button>
+        <button id="bulk-delete" class="danger">Unsubscribe selected</button>
+        <button id="new-folder">New folder</button>
+      </div>
+      <div class="small muted" id="feeds-summary"></div>
+      <div class="table-wrap">
+        <table class="feeds">
+          <thead><tr>
+            <th><input type="checkbox" id="select-all"></th><th>Feed</th><th>Folder</th><th>Updates</th><th>Notify</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody id="feeds-body"></tbody>
+        </table>
+      </div>
+      <h2>Folders</h2>
+      <div class="card" id="folders-list"></div>
+    </section>
+
+    <!-- RULES -->
+    <section id="tab-rules" class="tab">
+      <h1>Filters &amp; keyword alerts</h1>
+      <p class="muted">Rules run on every new post. Use them to get notified about keywords, highlight or star important posts, or hide posts you never want to see.</p>
+      <div class="toolbar"><button id="rule-new" class="primary">New rule</button></div>
+      <div id="rules-list"></div>
+      <form id="rule-form" class="card rule-form" hidden>
+        <h2 id="rule-form-title">New rule</h2>
+        <label class="field"><span>Name</span><input id="rule-name" type="text" placeholder="e.g. Mentions of my company"></label>
+        <div class="field"><span>When</span>
+          <div class="row">
+            <select id="rule-field"></select>
+            <select id="rule-op"></select>
+            <input id="rule-value" type="text" placeholder="keyword, another keyword">
+          </div>
+          <small class="muted">“contains” matches any of several comma-separated keywords.</small>
+        </div>
+        <label class="check"><input id="rule-case" type="checkbox"> Case sensitive</label>
+        <div class="field"><span>In feeds</span>
+          <select id="rule-feeds" multiple size="6"></select>
+          <small class="muted">Select none to apply to all feeds. Ctrl/⌘-click to select several.</small>
+        </div>
+        <div class="field"><span>Then</span><div id="rule-actions" class="actions-grid"></div></div>
+        <div id="rule-error" class="error-text small"></div>
+        <div id="rule-preview" class="small muted"></div>
+        <div class="row">
+          <button type="button" id="rule-test">Preview matches</button>
+          <span style="flex:1"></span>
+          <button type="button" id="rule-cancel">Cancel</button>
+          <button type="submit" class="primary">Save rule</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- IMPORT / EXPORT -->
+    <section id="tab-import" class="tab">
+      <h1>Import &amp; export</h1>
+      <h2>OPML (subscriptions)</h2>
+      <div class="card">
+        <p class="muted">OPML is the standard format every RSS reader (Feedly, Inoreader, Feeder, NetNewsWire, The Old Reader…) can import and export. Folders are preserved.</p>
+        <div id="drop-zone" class="drop-zone">
+          <b>Drop an .opml / .xml file here</b> or <label class="btn">Choose file<input id="opml-file" type="file" accept=".opml,.xml,text/xml,application/xml,text/x-opml" hidden></label>
+        </div>
+        <div id="import-status" class="small"></div>
+        <div class="row"><button id="export-opml" class="primary">Export OPML</button></div>
+      </div>
+      <h2>Full backup (JSON)</h2>
+      <div class="card">
+        <p class="muted">Includes feeds, folders, per-feed settings, rules, reader settings and starred posts.</p>
+        <div class="row">
+          <button id="export-json" class="primary">Export backup</button>
+          <label class="btn">Restore backup…<input id="json-file" type="file" accept=".json,application/json" hidden></label>
+        </div>
+        <div id="backup-status" class="small"></div>
+      </div>
+    </section>
+
+    <!-- SYNC -->
+    <section id="tab-sync" class="tab">
+      <h1>Sync</h1>
+      <div class="card">
+        <label class="setting"><span><b>Sync subscriptions, folders and rules</b><small>Uses Chrome’s built-in sync (your Google account in Chrome). No third-party server. Read/unread state and post content stay on each device.</small></span>
+          <input type="checkbox" data-setting="syncSubscriptions"></label>
+        <div class="setting"><span><b>Status</b><small id="sync-status">—</small></span><button id="sync-now">Sync now</button></div>
+      </div>
+      <p class="small muted">Chrome sync storage is limited to ~100&nbsp;KB. Subscriptions are compressed, which is enough for a few thousand feeds.</p>
+    </section>
+
+    <!-- ABOUT -->
+    <section id="tab-about" class="tab">
+      <h1>About</h1>
+      <div class="card prose">
+        <p><b>Tributary</b> is a free, open-source RSS, Atom and JSON Feed reader that runs entirely in your browser.</p>
+        <ul>
+          <li>No account, no server, no tracking, no limits on feeds.</li>
+          <li>Feeds are fetched directly from your browser; data is stored locally (IndexedDB).</li>
+          <li>Subscriptions can optionally sync through your Chrome profile.</li>
+        </ul>
+        <p>Keyboard shortcut to open the popup: <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> — <a href="#" id="shortcuts-link">change shortcuts</a>.</p>
+        <p class="small muted">Full-article extraction uses Mozilla Readability (Apache License 2.0).</p>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast" role="status"></div>
+</body>
+</html>

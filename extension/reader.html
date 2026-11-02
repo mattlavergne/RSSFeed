@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tributary</title>
+<link rel="icon" href="icons/icon32.png">
+<link rel="stylesheet" href="ui/app.css">
+<script src="lib/vendor/Readability.js"></script>
+<script type="module" src="ui/app.js"></script>
+</head>
+<body class="tab">
+<div id="app">
+  <header class="topbar">
+    <button id="btn-sidebar" class="icon-btn" title="Toggle feed list (b)"><i data-icon="sidebar"></i></button>
+    <div class="brand"><img src="icons/icon32.png" alt=""><span>Tributary</span></div>
+    <div class="search"><input id="search" type="search" placeholder="Search posts   /" autocomplete="off"></div>
+    <div class="actions">
+      <span id="refresh-status"></span>
+      <button id="btn-refresh" class="icon-btn" title="Refresh all feeds (r)"><i data-icon="refresh"></i></button>
+      <button id="btn-add" class="icon-btn" title="Add a feed (a)"><i data-icon="plus"></i></button>
+      <button id="btn-markall" class="icon-btn" title="Mark all in this view as read (Shift+A)"><i data-icon="checkAll"></i></button>
+      <button id="btn-open-tab" class="icon-btn" title="Open reader in a tab"><i data-icon="expand"></i></button>
+      <button id="btn-help" class="icon-btn" title="Keyboard shortcuts (?)"><i data-icon="help"></i></button>
+      <button id="btn-settings" class="icon-btn" title="Settings, import &amp; export"><i data-icon="settings"></i></button>
+    </div>
+  </header>
+  <div id="discover-banner" hidden></div>
+  <main id="layout" class="layout">
+    <nav id="sidebar" aria-label="Feeds"></nav>
+    <section id="list-pane">
+      <div class="list-header">
+        <h2 id="view-title">All articles</h2>
+        <div class="seg" role="group" aria-label="Filter">
+          <button data-filter="unread">Unread</button>
+          <button data-filter="all">All</button>
+        </div>
+      </div>
+      <button id="new-pill" hidden>New posts</button>
+      <div id="list-scroll">
+        <ul id="post-list"></ul>
+        <div id="list-footer" class="list-footer"></div>
+      </div>
+    </section>
+    <article id="article-pane" aria-live="polite"></article>
+  </main>
+</div>
+
+<dialog id="dlg-add">
+  <form method="dialog">
+    <div class="dlg-head"><h3>Add a feed</h3><button class="icon-btn" value="cancel" title="Close"><i data-icon="x"></i></button></div>
+    <div class="dlg-body">
+      <label class="field"><span>Website or feed URL</span>
+        <div class="row">
+          <input id="add-url" type="url" placeholder="https://example.com or https://example.com/feed.xml" required>
+          <button id="add-find" class="primary" type="button">Find feeds</button>
+        </div>
+      </label>
+      <label class="field"><span>Folder</span>
+        <div class="row">
+          <select id="add-folder"></select>
+          <input id="add-new-folder" type="text" placeholder="New folder name" hidden>
+        </div>
+      </label>
+      <div id="add-status" class="small muted"></div>
+      <div id="add-results" class="candidates"></div>
+      <div class="small muted">Tip: private feeds with HTTP auth work as <code>https://user:password@host/feed</code>.</div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-feed">
+  <form method="dialog" id="feed-form">
+    <div class="dlg-head"><h3>Edit feed</h3><button class="icon-btn" value="cancel" title="Close"><i data-icon="x"></i></button></div>
+    <div class="dlg-body">
+      <label class="field"><span>Title</span><input id="feed-title" type="text"></label>
+      <label class="field"><span>Feed URL</span><input id="feed-url" type="url" required></label>
+      <label class="field"><span>Folder</span>
+        <div class="row"><select id="feed-folder"></select><input id="feed-new-folder" type="text" placeholder="New folder name" hidden></div>
+      </label>
+      <div class="row">
+        <label class="field" style="flex:1"><span>Check for updates</span>
+          <select id="feed-interval">
+            <option value="">Default</option>
+            <option value="1">Every minute</option>
+            <option value="5">Every 5 minutes</option>
+            <option value="15">Every 15 minutes</option>
+            <option value="30">Every 30 minutes</option>
+            <option value="60">Every hour</option>
+            <option value="180">Every 3 hours</option>
+            <option value="360">Every 6 hours</option>
+            <option value="720">Every 12 hours</option>
+            <option value="1440">Once a day</option>
+          </select>
+        </label>
+        <label class="field" style="flex:1"><span>Notifications</span>
+          <select id="feed-notify">
+            <option value="">Default</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+      </div>
+      <label class="check"><input id="feed-full" type="checkbox"> Always load the full article (for feeds that only include summaries)</label>
+      <label class="check"><input id="feed-paused" type="checkbox"> Pause updates for this feed</label>
+      <div id="feed-info" class="feed-info"></div>
+    </div>
+    <div class="dlg-foot">
+      <button id="feed-delete" type="button" class="danger">Unsubscribe</button>
+      <button id="feed-markread" type="button">Mark all read</button>
+      <button id="feed-refresh" type="button">Refresh</button>
+      <span class="spacer"></span>
+      <button value="cancel">Cancel</button>
+      <button id="feed-save" class="primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-folder">
+  <form method="dialog">
+    <div class="dlg-head"><h3 id="folder-dlg-title">Folder</h3><button class="icon-btn" value="cancel" title="Close"><i data-icon="x"></i></button></div>
+    <div class="dlg-body">
+      <label class="field"><span>Name</span><input id="folder-name" type="text" required></label>
+    </div>
+    <div class="dlg-foot">
+      <button id="folder-delete" type="button" class="danger">Delete folder</button>
+      <button id="folder-markread" type="button">Mark all read</button>
+      <span class="spacer"></span>
+      <button value="cancel">Cancel</button>
+      <button id="folder-save" class="primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirm">
+  <form method="dialog">
+    <div class="dlg-body" style="padding-top:18px"><div id="confirm-text"></div><label class="check" id="confirm-extra" hidden><input type="checkbox" id="confirm-check"> <span></span></label></div>
+    <div class="dlg-foot"><button value="cancel">Cancel</button><button value="ok" class="primary" id="confirm-ok">OK</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-help">
+  <form method="dialog">
+    <div class="dlg-head"><h3>Keyboard shortcuts</h3><button class="icon-btn" value="cancel" title="Close"><i data-icon="x"></i></button></div>
+    <div class="dlg-body help-grid">
+      <span><kbd>j</kbd> <kbd>k</kbd></span><span>Next / previous post</span>
+      <span><kbd>o</kbd> <kbd>Enter</kbd></span><span>Open post in a new tab</span>
+      <span><kbd>m</kbd></span><span>Toggle read / unread</span>
+      <span><kbd>s</kbd></span><span>Star / unstar</span>
+      <span><kbd>f</kbd></span><span>Load full article</span>
+      <span><kbd>c</kbd></span><span>Copy post link</span>
+      <span><kbd>Shift</kbd>+<kbd>A</kbd></span><span>Mark all in view as read</span>
+      <span><kbd>u</kbd></span><span>Toggle unread only / all</span>
+      <span><kbd>Shift</kbd>+<kbd>J</kbd> / <kbd>K</kbd></span><span>Next / previous feed</span>
+      <span><kbd>r</kbd></span><span>Refresh all feeds</span>
+      <span><kbd>a</kbd></span><span>Add a feed</span>
+      <span><kbd>/</kbd></span><span>Search</span>
+      <span><kbd>b</kbd></span><span>Toggle the feed list</span>
+      <span><kbd>Esc</kbd></span><span>Close the article / clear search</span>
+      <span><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></span><span>Open the popup from anywhere (change at chrome://extensions/shortcuts)</span>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="status"></div>
+</body>
+</html>

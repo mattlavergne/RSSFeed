@@ -1,0 +1,12 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "JSON Feed Example",
+  "home_page_url": "https://json.example.net/",
+  "feed_url": "https://json.example.net/feed.json",
+  "authors": [{"name": "Jay"}],
+  "items": [
+    {"id": "1", "url": "https://json.example.net/1", "title": "JSON item one", "content_html": "<p>Hi from <i>JSON</i></p>", "date_published": "2026-11-01T10:00:00-05:00", "image": "https://json.example.net/1.png"},
+    {"id": "2", "url": "https://json.example.net/2", "content_text": "Text only item without a title", "date_published": "2026-10-31T10:00:00Z",
+     "attachments": [{"url": "https://json.example.net/2.mp4", "mime_type": "video/mp4", "size_in_bytes": 1000}]}
+  ]
+}

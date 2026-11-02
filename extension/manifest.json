@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Tributary RSS Reader",
+  "short_name": "Tributary",
+  "version": "1.0.0",
+  "description": "A fast, private, fully free RSS/Atom/JSON Feed reader. No accounts, no limits, OPML import/export.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Tributary RSS Reader",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "notifications",
+    "offscreen",
+    "contextMenus",
+    "scripting",
+    "favicon"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Open the reader popup"
+    },
+    "open-reader-tab": {
+      "suggested_key": { "default": "Alt+Shift+T" },
+      "description": "Open the reader in a full tab"
+    },
+    "refresh-all": {
+      "description": "Refresh all feeds"
+    }
+  }
+}

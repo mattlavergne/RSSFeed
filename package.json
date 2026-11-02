@@ -1,0 +1,17 @@
+{
+  "name": "tributary-rss-reader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Free, private RSS reader browser extension",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "node --test tests/unit.test.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

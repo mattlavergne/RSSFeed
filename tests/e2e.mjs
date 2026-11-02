@@ -1,0 +1,419 @@
+// End-to-end test: loads the unpacked extension in Chromium and drives it against local fixture feeds.
+// Run: node tests/e2e.mjs   (HEADED=1 to watch, SCREENSHOTS=1 to refresh docs/screenshots)
+import { createRequire } from 'node:module';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { startServer } from './server.mjs';
+
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const EXT = path.join(root, 'extension');
+const SHOTS = path.join(root, 'docs', 'screenshots');
+const wantShots = !!process.env.SCREENSHOTS;
+
+const results = [];
+async function step(name, fn) {
+  const t = Date.now();
+  try {
+    await fn();
+    results.push({ name, ok: true });
+    console.log(`  ✓ ${name} (${Date.now() - t}ms)`);
+  } catch (e) {
+    results.push({ name, ok: false, e });
+    console.log(`  ✗ ${name}\n    ${e.stack?.split('\n').slice(0, 4).join('\n    ')}`);
+  }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(fn, { timeout = 10000, interval = 150, msg = 'condition' } = {}) {
+  const end = Date.now() + timeout;
+  let last;
+  while (Date.now() < end) {
+    last = await fn();
+    if (last) return last;
+    await sleep(interval);
+  }
+  throw new Error(`Timed out waiting for ${msg} (last: ${JSON.stringify(last)})`);
+}
+
+const srv = await startServer();
+const B = srv.base;
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tributary-e2e-'));
+const ctx = await chromium.launchPersistentContext(userDataDir, {
+  channel: 'chromium',
+  headless: !process.env.HEADED,
+  viewport: { width: 1280, height: 800 },
+  args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
+});
+const pageErrors = [];
+ctx.on('page', (p) => {
+  p.on('pageerror', (e) => pageErrors.push(`${p.url()}: ${e.message}`));
+});
+
+let [sw] = ctx.serviceWorkers();
+if (!sw) sw = await ctx.waitForEvent('serviceworker');
+const extId = new URL(sw.url()).host;
+const X = (p) => `chrome-extension://${extId}/${p}`;
+
+// The install handler opens a welcome tab; wait for it and close it so the test tab stays in the
+// foreground (background tabs get throttled animation frames, which slows Playwright's actions).
+const welcome = ctx.pages().find((p) => p.url().includes('#welcome')) || await ctx.waitForEvent('page', { timeout: 5000 }).catch(() => null);
+const page = await ctx.newPage();
+page.on('pageerror', (e) => pageErrors.push(`reader: ${e.message}`));
+for (const p of ctx.pages()) if (p !== page) await p.close();
+void welcome;
+await page.goto(X('reader.html'));
+
+const msg = (type, data = {}) => page.evaluate(([type, data]) => chrome.runtime.sendMessage({ type, ...data }), [type, data]);
+const feedsByTitle = async () => Object.fromEntries((await page.evaluate(async () => (await import('/lib/db.js')).getAllFeeds())).map((f) => [f.title, f]));
+const postsOf = (feedId) => page.evaluate(async (id) => {
+  const db = await import('/lib/db.js');
+  return (await db.queryPosts({ feedIds: [id], filter: 'all', limit: 100 })).posts;
+}, feedId);
+
+console.log(`Extension ${extId}, fixtures at ${B}`);
+
+await step('welcome screen shows for a fresh install', async () => {
+  await page.waitForSelector('.welcome');
+  if (wantShots) {
+    fs.mkdirSync(SHOTS, { recursive: true });
+    await page.screenshot({ path: path.join(SHOTS, 'welcome.png') });
+  }
+});
+
+await step('discover: page with <link rel=alternate> tags', async () => {
+  const r = await msg('discover', { url: `${B}/page.html` });
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(r.candidates.map((c) => c.title).sort(), ['Atom Example', 'Example & Co Blog']);
+});
+
+await step('discover: falls back to common feed paths', async () => {
+  const r = await msg('discover', { url: `${B}/site/` });
+  assert.ok(r.ok, r.error);
+  assert.equal(r.candidates[0].title, 'Guessed Feed');
+});
+
+await step('discover: reports errors for unreachable pages', async () => {
+  const r = await msg('discover', { url: `${B}/missing.html` });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /HTTP 404/);
+});
+
+const subs = ['rss2.xml', 'atom.xml', 'feed.json', 'rdf.xml', 'latin1.xml', 'broken.xml', 'summary.xml', 'dynamic.xml'];
+await step('subscribe to RSS 2.0, Atom, JSON Feed, RDF, latin-1, malformed, private feeds', async () => {
+  for (const s of subs) {
+    const r = await msg('subscribe', { url: `${B}/${s}` });
+    assert.ok(r.ok, `${s}: ${r.error}`);
+    assert.equal(r.feed.lastError, '', `${s}: ${r.feed.lastError}`);
+  }
+  const auth = await msg('subscribe', { url: B.replace('http://', 'http://user:secret@') + '/auth.xml' });
+  assert.equal(auth.feed.lastError, '', auth.feed.lastError);
+  const again = await msg('subscribe', { url: `${B}/rss2.xml` });
+  assert.equal(again.existed, true);
+});
+
+let F;
+await step('parsed feed metadata is correct', async () => {
+  F = await feedsByTitle();
+  for (const t of ['Example & Co Blog', 'Atom Example', 'JSON Feed Example', 'RDF Site', 'Café Latin1', 'Broken & Co', 'Private Feed', 'Summary Only', 'Dynamic Feed']) {
+    assert.ok(F[t], `missing feed "${t}" — have ${Object.keys(F).join(', ')}`);
+  }
+  assert.equal(F['Example & Co Blog'].siteUrl, 'https://example.com/');
+  assert.equal(F['Atom Example'].siteUrl, 'https://atom.example.org/');
+});
+
+await step('RSS 2.0 items: titles, authors, images, enclosures, fallbacks', async () => {
+  const posts = await postsOf(F['Example & Co Blog'].id);
+  assert.equal(posts.length, 3);
+  const first = posts.find((p) => p.link === 'https://example.com/first');
+  assert.equal(first.title, 'First post with bold title');
+  assert.equal(first.author, 'Alice');
+  assert.equal(first.image, 'https://example.com/thumb1.jpg');
+  assert.equal(first.published, Date.parse('Mon, 02 Nov 2026 10:00:00 +0000'));
+  const ep = posts.find((p) => p.title === 'Podcast episode');
+  assert.equal(ep.enclosures[0].url, 'https://example.com/ep2.mp3');
+  assert.equal(ep.enclosures[0].type, 'audio/mpeg');
+  const untitled = posts.find((p) => p.link === 'https://example.com/untitled');
+  assert.match(untitled.title, /^An item with no title/);
+});
+
+await step('Atom / JSON Feed / RDF / latin-1 / malformed items', async () => {
+  const atom = await postsOf(F['Atom Example'].id);
+  const one = atom.find((p) => p.link === 'https://atom.example.org/posts/one');
+  assert.ok(one, JSON.stringify(atom.map((p) => p.link)));
+  assert.equal(one.title, 'Atom <entry> one');
+  assert.equal(one.author, 'Feed Author');
+  assert.equal(atom.find((p) => p.title === 'Second entry').author, 'Bob');
+  const content = await page.evaluate(async (id) => (await import('/lib/db.js')).getContent(id), one.id);
+  assert.match(content.html, /XHTML <em>content<\/em>/);
+
+  const json = await postsOf(F['JSON Feed Example'].id);
+  assert.equal(json.length, 2);
+  assert.equal(json.find((p) => p.link.endsWith('/2')).title, 'Text only item without a title');
+  assert.equal(json.find((p) => p.link.endsWith('/2')).enclosures[0].type, 'video/mp4');
+  assert.equal(json.find((p) => p.link.endsWith('/1')).image, 'https://json.example.net/1.png');
+
+  const rdf = await postsOf(F['RDF Site'].id);
+  assert.equal(rdf[0].title, 'RDF item A');
+  assert.equal(rdf[0].published, Date.parse('2026-10-29T10:00:00Z'));
+
+  const latin = await postsOf(F['Café Latin1'].id);
+  assert.equal(latin[0].title, 'Crème brûlée & friends');
+
+  const broken = await postsOf(F['Broken & Co'].id);
+  assert.equal(broken[0].title, 'Tom & Jerry');
+  assert.equal(broken[0].link, 'https://b.example/1?a=1&b=2');
+});
+
+await step('badge shows the unread count', async () => {
+  const total = await page.evaluate(async () => (await import('/lib/db.js')).getTotalUnread());
+  const badge = await page.evaluate(() => chrome.action.getBadgeText({}));
+  assert.ok(total > 10);
+  assert.equal(badge, String(total));
+});
+
+await step('conditional GET: unchanged feed returns 304 and is not an error', async () => {
+  const before = srv.hits['/dynamic.xml'];
+  const r = await msg('refresh', { feedIds: [F['Dynamic Feed'].id], force: false });
+  assert.ok(r.ok, r.error);
+  assert.equal(r.added, 0);
+  assert.equal(srv.hits['/dynamic.xml'], before + 1);
+  const f = (await feedsByTitle())['Dynamic Feed'];
+  assert.equal(f.lastError, '');
+});
+
+await step('rules: keyword alert highlights + stars, filter hides spam', async () => {
+  await page.evaluate(async () => {
+    const { saveRules } = await import('/lib/settings.js');
+    await saveRules([
+      { id: 'r1', name: 'Kittens', enabled: true, field: 'title', op: 'contains', value: 'kitten', caseSensitive: false, feedIds: [], actions: ['notify', 'highlight', 'star'] },
+      { id: 'r2', name: 'No spam', enabled: true, field: 'any', op: 'contains', value: 'spam', caseSensitive: false, feedIds: [], actions: ['delete'] },
+    ]);
+  });
+  await fetch(`${B}/dynamic/add?title=${encodeURIComponent('Cute kitten pictures')}`);
+  await fetch(`${B}/dynamic/add?title=${encodeURIComponent('Buy SPAM now')}`);
+  const r = await msg('refresh', { feedIds: [F['Dynamic Feed'].id], force: false });
+  assert.equal(r.added, 1);
+  const posts = await postsOf(F['Dynamic Feed'].id);
+  const kitten = posts.find((p) => p.title === 'Cute kitten pictures');
+  assert.equal(kitten.highlight, 1);
+  assert.equal(kitten.starred, 1);
+  assert.ok(!posts.some((p) => /spam/i.test(p.title)));
+  const notes = await until(async () => {
+    const all = await page.evaluate(() => chrome.notifications.getAll());
+    return Object.keys(all).length ? all : null;
+  }, { msg: 'keyword-alert notification' });
+  assert.ok(Object.keys(notes).includes(`post:${kitten.id}`), JSON.stringify(notes));
+});
+
+await step('auto-refresh alarm only fetches feeds that are due', async () => {
+  const dyn = F['Dynamic Feed'].id;
+  await page.evaluate(async (dyn) => {
+    const db = await import('/lib/db.js');
+    for (const f of await db.getAllFeeds()) await db.updateFeed(f.id, { lastFetched: f.id === dyn ? 0 : Date.now() });
+  }, dyn);
+  const before = { dyn: srv.hits['/dynamic.xml'], rss: srv.hits['/rss2.xml'] };
+  await page.evaluate(() => chrome.alarms.create('refresh', { when: Date.now() + 50, periodInMinutes: 1 }));
+  await until(() => srv.hits['/dynamic.xml'] > before.dyn, { timeout: 15000, msg: 'alarm-triggered fetch' });
+  await sleep(500);
+  assert.equal(srv.hits['/rss2.xml'], before.rss, 'feed that is not due was fetched');
+});
+
+await step('detects feeds advertised by an open web page', async () => {
+  const web = await ctx.newPage();
+  await web.goto(`${B}/page.html`);
+  await page.bringToFront();
+  const tabId = await page.evaluate(async (url) => (await chrome.tabs.query({ url })).at(0)?.id, `${B}/page.html`);
+  assert.ok(tabId, 'tab not found');
+  const r = await msg('detectTab', { tabId });
+  assert.deepEqual(r.feeds.map((f) => f.title).sort(), ['Atom feed', 'Main RSS']);
+  await web.close();
+});
+
+await step('reader UI: sidebar, list, sanitized article', async () => {
+  await page.goto(X('reader.html'));
+  await page.waitForSelector('#sidebar .nav-item.feed');
+  const feedCount = await page.locator('#sidebar .nav-item.feed').count();
+  assert.equal(feedCount, 9);
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'Example & Co Blog' }).click();
+  await page.locator('#post-list li', { hasText: 'First post with bold title' }).click();
+  await page.waitForSelector('#article-pane .content p');
+  const html = await page.locator('#article-pane .content').innerHTML();
+  assert.ok(!/<script/i.test(html), 'script tag leaked');
+  assert.ok(!/onerror|onclick|style=/i.test(html), `attribute leaked: ${html}`);
+  assert.ok(!/javascript:/i.test(html), 'javascript: url leaked');
+  assert.ok(!/<iframe/i.test(html), 'iframe leaked');
+  assert.ok(html.includes('src="https://example.com/img/a.png"'), 'relative image not resolved');
+  assert.ok(html.includes('href="https://example.com/rel"'), 'relative link not resolved');
+  assert.ok(!html.includes('tracker.example'), 'tracking pixel kept');
+  assert.ok(html.includes('Open embedded content'), 'iframe placeholder missing');
+  // Opening marks as read
+  const read = await page.evaluate(async () => {
+    const db = await import('/lib/db.js');
+    const all = await db.getAllFeeds();
+    const f = all.find((x) => x.title === 'Example & Co Blog');
+    const { posts } = await db.queryPosts({ feedIds: [f.id], filter: 'all' });
+    return posts.find((p) => p.link === 'https://example.com/first').read;
+  });
+  assert.equal(read, 1);
+});
+
+await step('keyboard: j/k navigation, s to star, m to toggle read', async () => {
+  await page.locator('#sidebar .nav-item', { hasText: 'All articles' }).click();
+  await page.locator('.seg button[data-filter="all"]').click();
+  await page.waitForSelector('#post-list li');
+  await page.keyboard.press('j');
+  const first = await page.locator('#post-list li.active').getAttribute('data-id');
+  await page.keyboard.press('j');
+  const second = await page.locator('#post-list li.active').getAttribute('data-id');
+  assert.notEqual(first, second);
+  await page.keyboard.press('k');
+  assert.equal(await page.locator('#post-list li.active').getAttribute('data-id'), first);
+  const starredBefore = await page.evaluate(async () => (await import('/lib/db.js')).getStarredCount());
+  await page.keyboard.press('s');
+  await until(async () => (await page.evaluate(async () => (await import('/lib/db.js')).getStarredCount())) === starredBefore + 1, { msg: 'star' });
+  await page.keyboard.press('m');
+  await until(async () => (await page.locator('#post-list li.active.unread').count()) === 1, { msg: 'mark unread' });
+});
+
+await step('full article extraction (Readability)', async () => {
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'Summary Only' }).click();
+  await page.locator('#post-list li', { hasText: 'Needs full text' }).click();
+  await page.locator('[data-act="full"]').click();
+  await until(async () => (await page.locator('#article-pane .content').innerText()).includes('FULLTEXT_MARKER'), { msg: 'full text' });
+  assert.ok(!(await page.locator('#article-pane .content').innerText()).includes('Menu Home About'), 'boilerplate not stripped');
+});
+
+await step('search filters posts', async () => {
+  await page.locator('#sidebar .nav-item', { hasText: 'All articles' }).click();
+  await page.fill('#search', 'brûlée');
+  await until(async () => (await page.locator('#post-list li').count()) === 1, { msg: 'search result' });
+  await page.fill('#search', '');
+  await page.locator('#search').press('Escape');
+});
+
+await step('mark all as read in a view', async () => {
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'JSON Feed Example' }).click();
+  await page.locator('#btn-markall').click();
+  await page.locator('#confirm-ok').click();
+  await until(async () => (await page.evaluate(async (id) => (await import('/lib/db.js')).getUnreadCounts([id]), F['JSON Feed Example'].id))[F['JSON Feed Example'].id] === 0, { msg: 'mark all read' });
+});
+
+await step('screenshots', async () => {
+  if (!wantShots) return;
+  await page.locator('#sidebar .nav-item', { hasText: 'All articles' }).click();
+  await page.locator('.seg button[data-filter="all"]').click();
+  await page.locator('#post-list li', { hasText: 'First post with bold title' }).click();
+  await sleep(400);
+  await page.screenshot({ path: path.join(SHOTS, 'reader.png') });
+  await page.evaluate(async () => (await import('/lib/settings.js')).saveSettings({ theme: 'dark' }));
+  await sleep(300);
+  await page.screenshot({ path: path.join(SHOTS, 'reader-dark.png') });
+  await page.evaluate(async () => (await import('/lib/settings.js')).saveSettings({ theme: 'system' }));
+});
+
+await step('popup layout renders in 780×580', async () => {
+  const popup = await ctx.newPage();
+  popup.on('pageerror', (e) => pageErrors.push(`popup: ${e.message}`));
+  await popup.setViewportSize({ width: 780, height: 580 });
+  await popup.goto(X('popup.html'));
+  await popup.waitForSelector('#post-list li');
+  await popup.locator('#post-list li').first().click();
+  await popup.waitForSelector('#article-pane .article');
+  assert.equal(await popup.locator('#list-pane').isVisible(), false, 'list should be hidden while reading in popup');
+  if (wantShots) await popup.screenshot({ path: path.join(SHOTS, 'popup.png') });
+  await popup.locator('[data-act="back"]').click();
+  assert.equal(await popup.locator('#list-pane').isVisible(), true);
+  await popup.close();
+  await page.bringToFront();
+});
+
+await step('OPML import (nested folders) via options page', async () => {
+  const opts = await ctx.newPage();
+  opts.on('pageerror', (e) => pageErrors.push(`options: ${e.message}`));
+  await opts.goto(X('options.html#import'));
+  // Remove two feeds first so the import actually adds them.
+  await page.evaluate(async () => {
+    const db = await import('/lib/db.js');
+    for (const f of await db.getAllFeeds()) if (['JSON Feed Example', 'RDF Site'].includes(f.title)) await db.deleteFeed(f.id);
+  });
+  const opml = (await (await fetch(`${B}/subs.opml`)).text());
+  const tmp = path.join(userDataDir, 'subs.opml');
+  fs.writeFileSync(tmp, opml);
+  await opts.setInputFiles('#opml-file', tmp);
+  await opts.waitForSelector('#import-status b');
+  assert.match(await opts.locator('#import-status').innerText(), /Imported 2 feeds, skipped 1/);
+  await until(async () => {
+    const F2 = await feedsByTitle();
+    return F2['JSON Feed Example']?.lastSuccess && F2['RDF Site']?.lastSuccess;
+  }, { msg: 'imported feeds fetched' });
+  const folders = await page.evaluate(async () => (await (await import('/lib/db.js')).getAllFolders()).map((f) => f.name).sort());
+  assert.deepEqual(folders, ['Tech', 'Tech / Nested']);
+  if (wantShots) {
+    await opts.goto(X('options.html#feeds'));
+    await opts.waitForSelector('#feeds-body tr');
+    await opts.screenshot({ path: path.join(SHOTS, 'options-feeds.png') });
+    await opts.goto(X('options.html#rules'));
+    await opts.locator('#rule-new').click();
+    await opts.screenshot({ path: path.join(SHOTS, 'options-rules.png') });
+  }
+
+  // Export OPML and re-parse it
+  await opts.goto(X('options.html#import'));
+  const [download] = await Promise.all([opts.waitForEvent('download'), opts.locator('#export-opml').click()]);
+  const exported = fs.readFileSync(await download.path(), 'utf8');
+  const parsed = await opts.evaluate(async (text) => (await import('/lib/feedparse.js')).parseOpml(text), exported);
+  assert.equal(parsed.length, 9);
+  assert.equal(parsed.find((f) => f.title === 'RDF Site').folder, 'Tech / Nested');
+
+  // JSON backup export contains starred posts and rules
+  const [dl2] = await Promise.all([opts.waitForEvent('download'), opts.locator('#export-json').click()]);
+  const backup = JSON.parse(fs.readFileSync(await dl2.path(), 'utf8'));
+  assert.equal(backup.feeds.length, 9);
+  assert.equal(backup.rules.length, 2);
+  assert.ok(backup.starred.length >= 2);
+  await opts.close();
+  await page.bringToFront();
+});
+
+await step('sync: pushes to chrome.storage.sync and applies remote additions', async () => {
+  const r = await msg('syncNow');
+  assert.ok(r.ok, r.error);
+  const payload = await page.evaluate(async () => (await import('/lib/sync.js')).readSyncPayload());
+  assert.equal(payload.payload.feeds.length, 9);
+  // Simulate another device adding a feed.
+  await page.evaluate(async (url) => {
+    const sync = await import('/lib/sync.js');
+    const { payload: p } = await sync.readSyncPayload();
+    p.feeds.push({ url, title: 'From other device', folder: 'Synced', m: Date.now() });
+    p.device = 'other-device';
+    p.updatedAt = Date.now();
+    await sync.writeSyncPayload(p);
+  }, `${B}/redirect`);
+  const synced = await until(async () => (await page.evaluate(async () => (await import('/lib/db.js')).getAllFeeds())).find((f) => f.url === `${B}/redirect` && f.lastSuccess), { timeout: 15000, msg: 'remote feed added and fetched' });
+  assert.equal(synced.customTitle, 'From other device');
+  const folders = await page.evaluate(async () => (await (await import('/lib/db.js')).getAllFolders()).map((f) => f.name));
+  assert.ok(folders.includes('Synced'));
+});
+
+await step('unsubscribe removes the feed and its posts', async () => {
+  const id = (await feedsByTitle())['Broken & Co'].id;
+  await page.evaluate(async (id) => (await import('/lib/db.js')).deleteFeed(id), id);
+  assert.equal((await postsOf(id)).length, 0);
+});
+
+await step('no uncaught page errors', async () => {
+  assert.deepEqual(pageErrors, []);
+});
+
+await ctx.close();
+await srv.close();
+fs.rmSync(userDataDir, { recursive: true, force: true });
+
+const failed = results.filter((r) => !r.ok);
+console.log(`\n${results.length - failed.length}/${results.length} passed`);
+process.exit(failed.length ? 1 : 0);

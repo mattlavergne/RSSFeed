@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+  <head><title>Exported from another reader</title></head>
+  <body>
+    <outline text="Tech" title="Tech">
+      <outline type="rss" text="JSON Feed Example" xmlUrl="{{BASE}}/feed.json" htmlUrl="https://json.example.net/"/>
+      <outline text="Nested">
+        <outline type="rss" text="RDF Site" xmlUrl="{{BASE}}/rdf.xml"/>
+      </outline>
+    </outline>
+    <outline type="rss" text="Latin" xmlUrl="{{BASE}}/latin1.xml"/>
+  </body>
+</opml>

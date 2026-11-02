@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+  <title>Example &amp; Co Blog</title>
+  <atom:link href="http://localhost/rss2.xml" rel="self" type="application/rss+xml"/>
+  <link>https://example.com/</link>
+  <description>Posts about &lt;things&gt;</description>
+  <image><url>https://example.com/logo.png</url><title>x</title><link>https://example.com/</link></image>
+  <item>
+    <title>First post with &lt;b&gt;bold&lt;/b&gt; title</title>
+    <link>https://example.com/first</link>
+    <guid isPermaLink="false">post-1</guid>
+    <dc:creator>Alice</dc:creator>
+    <pubDate>Mon, 02 Nov 2026 10:00:00 +0000</pubDate>
+    <description>Short summary</description>
+    <content:encoded><![CDATA[<p>Hello <b>world</b>.</p><script>alert(1)</script><img src="/img/a.png" onerror="alert(2)" width="600"><img src="https://tracker.example/p.gif" width="1" height="1"><a href="javascript:alert(3)">bad</a> <a href="/rel">relative link</a><iframe src="https://www.youtube.com/embed/xyz"></iframe><p style="color:red" onclick="x()">styled</p>]]></content:encoded>
+    <media:thumbnail url="https://example.com/thumb1.jpg"/>
+  </item>
+  <item>
+    <title>Podcast episode</title>
+    <link>https://example.com/ep2</link>
+    <guid>https://example.com/ep2</guid>
+    <pubDate>Sun, 01 Nov 2026 09:00:00 GMT</pubDate>
+    <description>&lt;p&gt;Episode notes&lt;/p&gt;</description>
+    <enclosure url="https://example.com/ep2.mp3" length="12345678" type="audio/mpeg"/>
+  </item>
+  <item>
+    <description>An item with no title and no guid, only a description that is long enough.</description>
+    <link>https://example.com/untitled</link>
+  </item>
+</channel>
+</rss>

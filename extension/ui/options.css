@@ -1,0 +1,66 @@
+@import url("base.css");
+
+body { background: var(--bg-2); }
+.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+.side { background: var(--bg); border-right: 1px solid var(--border); padding: 18px 12px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 14px; }
+.side .brand { display: flex; gap: 10px; align-items: center; padding: 0 6px; }
+.side .brand img { width: 32px; height: 32px; }
+#tabs { display: grid; gap: 2px; }
+#tabs a { padding: 8px 12px; border-radius: 6px; color: var(--fg); text-decoration: none; }
+#tabs a:hover { background: var(--bg-hover); }
+#tabs a.active { background: var(--bg-active); color: var(--accent); font-weight: 600; }
+.side #open-reader { margin-top: auto; justify-content: center; }
+main { padding: 24px 32px 80px; max-width: 1240px; min-width: 0; }
+h1 { font-size: 22px; margin: 0 0 16px; }
+h2 { font-size: 15px; margin: 24px 0 8px; }
+.tab { display: none; }
+.tab.active { display: block; }
+.card { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 6px 16px; }
+.card.prose { padding: 12px 18px; }
+.setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); color: var(--fg); }
+.setting:last-child { border-bottom: none; }
+.setting > span { display: grid; gap: 2px; }
+.setting small { color: var(--fg-3); font-size: 12px; }
+.setting select, .setting input[type="number"] { min-width: 180px; }
+.setting input[type="number"] { width: 120px; min-width: 0; }
+input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.toolbar input[type="search"] { flex: 1; min-width: 180px; }
+.table-wrap { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; margin-top: 8px; }
+table.feeds { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.feeds th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-3); padding: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.feeds td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+table.feeds tr:last-child td { border-bottom: none; }
+table.feeds .title-cell { display: flex; gap: 8px; align-items: center; min-width: 220px; }
+table.feeds .title-cell .fav { width: 16px; height: 16px; border-radius: 3px; flex: none; object-fit: contain; }
+table.feeds .title-cell input { flex: 1; border-color: transparent; background: transparent; padding: 3px 6px; font-weight: 600; }
+table.feeds .title-cell input:hover { border-color: var(--border); }
+table.feeds .url { font-size: 11.5px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; padding-left: 30px; }
+table.feeds select { padding: 3px 6px; font-size: 12.5px; }
+.status-ok { color: var(--fg-3); white-space: nowrap; }
+.status-err { color: var(--danger); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+.status-paused { color: var(--fg-3); font-style: italic; }
+.row-actions { white-space: nowrap; text-align: right; }
+.row-actions button { padding: 3px 8px; font-size: 12px; }
+.folder-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.folder-row:last-child { border-bottom: none; }
+.folder-row input { flex: 1; }
+.rule { display: flex; gap: 12px; align-items: center; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
+.rule .desc { flex: 1; min-width: 0; }
+.rule .desc .n { font-weight: 600; }
+.rule .desc .d { font-size: 12.5px; color: var(--fg-3); }
+.rule.disabled { opacity: .6; }
+.rule-form { display: grid; gap: 12px; padding: 16px; margin-top: 12px; }
+.rule-form h2 { margin: 0; }
+.rule-form .row input { flex: 1; }
+.actions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
+.drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 24px; text-align: center; margin: 8px 0; color: var(--fg-2); }
+.drop-zone.over { border-color: var(--accent); background: var(--accent-soft); }
+.card > .row { padding: 10px 0; }
+.card > p { margin: 12px 0 4px; }
+#import-status, #backup-status { padding: 4px 0 8px; }
+@media (max-width: 760px) {
+  .shell { grid-template-columns: 1fr; }
+  .side { position: static; height: auto; }
+  main { padding: 16px; }
+}
