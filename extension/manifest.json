@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Tributary RSS Reader",
   "short_name": "Tributary",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A fast, private, fully free RSS/Atom/JSON Feed reader. No accounts, no limits, OPML import/export.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjoVm5X6Sz+Vbf4bSPBX2i69IpbRra4+/+Wjx7D9LJYr0a8hdXsDIJ8nPOvX9XmQmF1GUHP+NxhAQ8ROEkXEJsK8pSNe5yoNmL26fGQe02XUAG9NrVqI6y4LL/GGKgfkUHhhOlZ7LoqNDcld/bC3hl0xVnP3Ae/dStMiQ3oSvIG5/sfA79O+3sZxewXG0ZfIMGlezGGqReqC9vycPqy8So1+TMpbyRD04IunyP3rTDW+ow3zkDS5JvRn5+YVbZrhyIMkYXqNmuB0LqvJh6yp77cUzpdC0w7Kj5cFGmIUgV/nPGCxCVgitZssPnSccx75YtuxBq0ezee3vz2iGcTF5UwIDAQAB",
   "minimum_chrome_version": "116",

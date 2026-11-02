@@ -5,6 +5,7 @@ import { getSettings, getRules, saveSettings } from './lib/settings.js';
 import { applyRules } from './lib/rules.js';
 import { uid, postId, hash, normalizeUrl, pool, hostOf } from './lib/util.js';
 import { mergeSubscriptions, writeSyncPayload, readSyncPayload, SYNC_META_KEY } from './lib/sync.js';
+import { siteFeedCandidates } from './lib/sites.js';
 
 const READER_URL = chrome.runtime.getURL('reader.html');
 const MIN_INTERVAL = 1;            // minutes
@@ -159,9 +160,11 @@ async function refreshFeed(feedId, { force = false } = {}) {
     const posts = [...byId.values()];
     const existing = await db.getExistingIds(posts.map((p) => p.id));
     const fresh = posts.filter((p) => !existing.has(p.id));
+    // Snoozed feed: anything published before the snooze ends arrives already read.
+    if (feed.snoozedUntil) for (const p of fresh) if (p.published < feed.snoozedUntil) p.read = 1;
     const { kept, alerts } = applyRules(rules, fresh);
     const keptIds = new Set(kept.map((p) => p.id));
-    const added = await db.addPosts(posts.filter((p) => existing.has(p.id) || keptIds.has(p.id)));
+    const added = await db.addPosts(posts.filter((p) => existing.has(p.id) || keptIds.has(p.id)), { dedupe: settings.hideDuplicates });
 
     await db.updateFeed(feedId, {
       title: parsed.title || feed.title,
@@ -171,14 +174,15 @@ async function refreshFeed(feedId, { force = false } = {}) {
       iconUrl: parsed.iconUrl || '',
       lastFetched: now, lastSuccess: now, lastError: '', errorCount: 0,
       etag: res.etag, lastModified: res.lastModified,
+      ...(feed.snoozedUntil && now >= feed.snoozedUntil ? { snoozedUntil: 0 } : {}),
     });
     await db.prunePosts(feedId, {
       maxPosts: settings.maxPostsPerFeed,
       keepReadDays: settings.keepReadDays,
       protectIds: new Set(posts.map((p) => p.id)),
     });
-    const addedIds = new Set(added.map((p) => p.id));
-    return { feed, added, alerts: alerts.filter((p) => addedIds.has(p.id)), initial };
+    const addedById = new Map(added.map((p) => [p.id, p]));
+    return { feed, added, alerts: alerts.filter((p) => addedById.has(p.id) && !addedById.get(p.id).dupOf), initial };
   } catch (e) {
     await db.updateFeed(feedId, { lastFetched: now, lastError: e.message || String(e), errorCount: (feed.errorCount || 0) + 1 });
     throw e;
@@ -193,7 +197,7 @@ async function refreshAll({ feedIds = null, force = false, auto = false } = {}) 
     const now = Date.now();
     let feeds = await db.getAllFeeds();
     if (feedIds) feeds = feeds.filter((f) => feedIds.includes(f.id));
-    else feeds = feeds.filter((f) => !f.paused);
+    else feeds = feeds.filter((f) => !f.paused && !(f.snoozedUntil > now));
     if (auto) feeds = feeds.filter((f) => now - (f.lastFetched || 0) >= feedIntervalMin(f, settings) * 60000 - 15000);
     if (!feeds.length) return { added: 0, errors: 0 };
 
@@ -363,13 +367,22 @@ async function tryParse(url, force = true) {
 
 const COMMON_PATHS = ['/feed', '/rss', '/feed.xml', '/rss.xml', '/atom.xml', '/index.xml', '/feed.json', '/feeds/posts/default', '/?feed=rss2'];
 
+async function checkCandidate(l) {
+  const { feed } = await tryParse(l.url);
+  return { url: l.url, title: feed.title || l.title, siteUrl: feed.siteUrl, count: feed.items.length, latest: feed.items[0]?.title || '' };
+}
+
 async function discover(rawUrl) {
   const url = normalizeUrl(rawUrl);
   if (!url) throw new Error('Please enter a valid URL');
+  // 0) Feeds that popular sites (Reddit, GitHub, YouTube, Mastodon…) have but don't advertise.
+  const special = siteFeedCandidates(url);
+  const specialFound = special.length ? (await pool(special, 4, checkCandidate)).filter((r) => r.ok).map((r) => r.value) : [];
   let res;
   try {
     res = await httpGet(url, { force: true });
   } catch (e) {
+    if (specialFound.length) return { candidates: specialFound };
     throw new Error(`Could not load ${hostOf(url) || url}: ${e.message}`);
   }
   // 1) The URL is itself a feed.
@@ -383,17 +396,14 @@ async function discover(rawUrl) {
   try { links = (await offscreen({ type: 'discoverLinks', html: res.text, url: res.url })).links; } catch { /* ignore */ }
 
   // 3) Common feed locations.
-  if (!links.length) {
+  if (!links.length && !specialFound.length) {
     const origin = new URL(res.url).origin;
     links = COMMON_PATHS.map((p) => ({ url: origin + p, title: '' }));
   }
 
-  const checked = await pool(links.slice(0, 10), 4, async (l) => {
-    const { feed } = await tryParse(l.url);
-    return { url: l.url, title: feed.title || l.title, siteUrl: feed.siteUrl, count: feed.items.length, latest: feed.items[0]?.title || '' };
-  });
+  const checked = await pool(links.slice(0, 10), 4, checkCandidate);
   const seen = new Set();
-  const candidates = checked.filter((r) => r.ok).map((r) => r.value).filter((c) => !seen.has(c.url) && seen.add(c.url));
+  const candidates = [...specialFound, ...checked.filter((r) => r.ok).map((r) => r.value)].filter((c) => !seen.has(c.url) && seen.add(c.url));
   if (!candidates.length) throw new Error('No feed found at this address. Try the direct feed URL.');
   return { candidates };
 }

@@ -2,6 +2,7 @@ import * as db from '../lib/db.js';
 import { getSettings, saveSettings, applyTheme, getRules, saveRules, DEFAULT_SETTINGS } from '../lib/settings.js';
 import { RULE_ACTIONS, RULE_FIELDS, RULE_OPS, validateRule, ruleMatches } from '../lib/rules.js';
 import { buildOpml } from '../lib/opml.js';
+import { assessFeeds } from '../lib/health.js';
 import { parseOpml } from '../lib/feedparse.js';
 import { escapeHtml, timeAgo, formatDate, downloadText, dateStamp, uid, postId, hash, hostOf, iconImg, attachIconFallbacks, displayUrl } from '../lib/util.js';
 
@@ -37,6 +38,7 @@ const changed = () => send('subscriptionsChanged').catch(() => {});
 
 function showTab(name) {
   if (!$(`#tab-${name}`)) name = 'general';
+  if (name === 'health') loadHealth();
   $$('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
   $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === name));
 }
@@ -83,6 +85,7 @@ function folderOptions(selected) {
 
 function feedStatus(f) {
   if (f.paused) return '<span class="status-paused">Paused</span>';
+  if (f.snoozedUntil > Date.now()) return `<span class="status-paused" title="${escapeHtml(formatDate(f.snoozedUntil))}">Snoozed until ${escapeHtml(new Date(f.snoozedUntil).toLocaleDateString())}</span>`;
   if (f.lastError) return `<span class="status-err" title="${escapeHtml(f.lastError)}">⚠ ${escapeHtml(f.lastError)}</span>`;
   if (f.lastSuccess) return `<span class="status-ok" title="${escapeHtml(formatDate(f.lastSuccess))}">Updated ${escapeHtml(timeAgo(f.lastSuccess))}</span>`;
   return '<span class="status-ok">Pending</span>';
@@ -235,6 +238,95 @@ function bindFeeds() {
     changed();
     await loadData();
     renderFeeds();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Feed health
+// ---------------------------------------------------------------------------
+
+let healthRows = [];
+
+async function loadHealth() {
+  const stats = await db.getFeedStats(feeds.map((f) => f.id), { windowDays: 30 });
+  healthRows = assessFeeds(feeds, stats);
+  renderHealth();
+}
+
+function renderHealth() {
+  const count = (k) => healthRows.filter((r) => r[k]).length;
+  const cards = [
+    ['failing', 'Failing', 'Errors for 3+ checks or 3+ days'],
+    ['inactive', 'Inactive', 'No posts in 90+ days'],
+    ['noisy', 'Noisy', '20+ posts/week and 3× the typical feed'],
+  ];
+  $('#health-summary').innerHTML = `<button class="health-card" data-hfilter="all"><b>${healthRows.length}</b>Feeds</button>${cards.map(([k, label, hint]) =>
+    `<button class="health-card${count(k) ? ' warn' : ''}" data-hfilter="${k}" title="${hint}"><b>${count(k)}</b>${label}<div class="small muted">${hint}</div></button>`).join('')}`;
+
+  const filter = $('#health-filter').value;
+  const sort = $('#health-sort').value;
+  let rows = healthRows.filter((r) => filter === 'all' || (filter === 'issues' ? r.failing || r.inactive || r.noisy : r[filter]));
+  const by = {
+    perWeek: (a, b) => b.perWeek - a.perWeek,
+    latest: (a, b) => (a.latest || 0) - (b.latest || 0),
+    unread: (a, b) => b.unread - a.unread,
+    name: (a, b) => feedTitle(a.feed).localeCompare(feedTitle(b.feed)),
+  }[sort];
+  rows = [...rows].sort(by);
+  const now = Date.now();
+  $('#health-body').innerHTML = rows.map((r) => {
+    const f = r.feed;
+    const badges = [
+      r.failing ? `<span class="badge failing" title="${escapeHtml(f.lastError)}">Failing</span>` : '',
+      r.inactive ? '<span class="badge inactive">Inactive</span>' : '',
+      r.noisy ? '<span class="badge noisy">Noisy</span>' : '',
+      f.snoozedUntil > now ? '<span class="badge snoozed">Snoozed</span>' : '',
+    ].join('') || '<span class="badge ok">OK</span>';
+    const hint = r.failing ? escapeHtml(f.lastError) : r.noisy ? 'Consider a filter rule or snoozing it' : '';
+    return `<tr data-id="${escapeHtml(f.id)}">
+      <td><div class="title-cell">${iconImg(f, 'fav')}<b>${escapeHtml(feedTitle(f))}</b></div>${hint ? `<div class="url">${hint}</div>` : ''}</td>
+      <td class="num">${r.perWeek >= 10 ? Math.round(r.perWeek) : r.perWeek.toFixed(1)}</td>
+      <td>${r.latest ? `<span title="${escapeHtml(formatDate(r.latest))}">${escapeHtml(timeAgo(r.latest))}${/^\d+[mhd]$/.test(timeAgo(r.latest)) ? ' ago' : ''}</span>` : '<span class="muted">never</span>'}</td>
+      <td class="num">${r.unread}</td>
+      <td>${badges}</td>
+      <td class="row-actions">
+        ${f.snoozedUntil > now ? '<button class="h-wake">Wake</button>' : '<button class="h-snooze" title="Skip this feed for a week; its posts during that time arrive already read">Snooze 1 week</button>'}
+        <button class="h-delete danger">Unsubscribe</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted" style="padding:16px">Nothing here.</td></tr>';
+  attachIconFallbacks($('#health-body'));
+}
+
+function bindHealth() {
+  $('#health-filter').addEventListener('change', renderHealth);
+  $('#health-sort').addEventListener('change', renderHealth);
+  $('#health-summary').addEventListener('click', (e) => {
+    const card = e.target.closest('[data-hfilter]');
+    if (!card) return;
+    $('#health-filter').value = card.dataset.hfilter;
+    renderHealth();
+  });
+  $('#health-body').addEventListener('click', async (e) => {
+    const tr = e.target.closest('tr[data-id]');
+    if (!tr) return;
+    const f = feeds.find((x) => x.id === tr.dataset.id);
+    if (e.target.closest('.h-delete')) {
+      if (!confirm(`Unsubscribe from “${feedTitle(f)}”?`)) return;
+      await db.deleteFeed(f.id);
+      changed();
+    } else if (e.target.closest('.h-snooze')) {
+      await db.updateFeed(f.id, { snoozedUntil: Date.now() + 7 * 86400000 });
+      await db.markAllRead([f.id]);
+      await send('unreadChanged').catch(() => {});
+      toast(`Snoozed ${feedTitle(f)} for a week`);
+    } else if (e.target.closest('.h-wake')) {
+      await db.updateFeed(f.id, { snoozedUntil: 0 });
+      toast('Woken up');
+    } else return;
+    await loadData();
+    renderFeeds();
+    await loadHealth();
   });
 }
 
@@ -543,6 +635,7 @@ async function init() {
   bindSettings();
   bindFeeds();
   bindRules();
+  bindHealth();
   bindImport();
   bindMisc();
   renderFeeds();

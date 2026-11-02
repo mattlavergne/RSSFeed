@@ -16,6 +16,7 @@
       <a href="#general" data-tab="general">General</a>
       <a href="#reading" data-tab="reading">Reading</a>
       <a href="#feeds" data-tab="feeds">Feeds</a>
+      <a href="#health" data-tab="health">Feed health</a>
       <a href="#rules" data-tab="rules">Filters &amp; alerts</a>
       <a href="#import" data-tab="import">Import &amp; export</a>
       <a href="#sync" data-tab="sync">Sync</a>
@@ -84,7 +85,10 @@
           <select data-setting="linkTarget"><option value="background">A background tab</option><option value="foreground">A new active tab</option></select></label>
         <label class="setting"><span><b>Middle-click on a post in the list</b><small>“Select” lets you pick several posts, then open them all at once with the <i>Open</i> button or <kbd>Shift</kbd>+<kbd>O</kbd>.</small></span>
           <select data-setting="middleClick"><option value="select">Selects it (open later in a batch)</option><option value="open">Opens it in a background tab</option></select></label>
-        <label class="setting"><span><b>Confirm before “mark all as read”</b></span><input type="checkbox" data-setting="markAllConfirm"></label>
+        <label class="setting"><span><b>Open at most this many tabs at once</b><small>When more posts are selected, the rest stay selected for the next batch.</small></span>
+          <select data-setting="openBatchMax" data-type="number"><option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="20">20</option><option value="30">30</option><option value="0">No limit</option></select></label>
+        <label class="setting"><span><b>Ask what to mark with “mark all as read”</b><small>Lets you choose everything or only posts older than a day, a week…  Off: marks everything immediately.</small></span><input type="checkbox" data-setting="markAllConfirm"></label>
+        <label class="setting"><span><b>Hide duplicate stories</b><small>When the same link or headline arrives from another feed, the later copy is marked as read and tagged “Duplicate”.</small></span><input type="checkbox" data-setting="hideDuplicates"></label>
       </div>
     </section>
 
@@ -109,6 +113,27 @@
       </div>
       <h2>Folders</h2>
       <div class="card" id="folders-list"></div>
+    </section>
+
+    <!-- HEALTH -->
+    <section id="tab-health" class="tab">
+      <h1>Feed health</h1>
+      <p class="muted">Find feeds worth cleaning up: ones that keep failing, ones that have gone quiet, and ones that post far more than the rest. Posts per week is measured over the last 30 days of stored posts.</p>
+      <div id="health-summary" class="health-cards"></div>
+      <div class="toolbar">
+        <label class="row small">Show
+          <select id="health-filter"><option value="all">All feeds</option><option value="issues">Only feeds with issues</option><option value="failing">Failing</option><option value="inactive">Inactive</option><option value="noisy">Noisy</option></select>
+        </label>
+        <label class="row small">Sort by
+          <select id="health-sort"><option value="perWeek">Posts per week</option><option value="latest">Last post</option><option value="unread">Unread</option><option value="name">Name</option></select>
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table class="feeds health">
+          <thead><tr><th>Feed</th><th class="num">Posts / week</th><th>Last post</th><th class="num">Unread</th><th>Status</th><th></th></tr></thead>
+          <tbody id="health-body"></tbody>
+        </table>
+      </div>
     </section>
 
     <!-- RULES -->

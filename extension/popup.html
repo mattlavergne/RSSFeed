@@ -31,6 +31,7 @@
     <section id="list-pane">
       <div class="list-header">
         <h2 id="view-title">All articles</h2>
+        <button id="btn-select-all" class="icon-btn" title="Select all unread posts in this view (Shift+X)"><i data-icon="selectAll"></i></button>
         <div class="seg" role="group" aria-label="Filter">
           <button data-filter="unread">Unread</button>
           <button data-filter="all">All</button>
@@ -109,6 +110,13 @@
       </div>
       <label class="check"><input id="feed-full" type="checkbox"> Always load the full article (for feeds that only include summaries)</label>
       <label class="check"><input id="feed-paused" type="checkbox"> Pause updates for this feed</label>
+      <label class="field"><span>Snooze</span>
+        <select id="feed-snooze"></select>
+      </label>
+      <div id="feed-snooze-opts" hidden>
+        <label class="check small"><input id="feed-snooze-markread" type="checkbox" checked> Also mark its current unread posts as read</label>
+        <div class="small muted">While snoozed the feed isn’t checked, and anything it publishes during the snooze arrives already read.</div>
+      </div>
       <div id="feed-info" class="feed-info"></div>
     </div>
     <div class="dlg-foot">
@@ -138,6 +146,23 @@
   </form>
 </dialog>
 
+<dialog id="dlg-markall">
+  <form method="dialog">
+    <div class="dlg-head"><h3>Mark as read</h3><button class="icon-btn" value="cancel" title="Close"><i data-icon="x"></i></button></div>
+    <div class="dlg-body">
+      <div id="markall-scope" class="muted"></div>
+      <div class="age-options">
+        <label class="check"><input type="radio" name="markall-age" value="0" checked> Everything</label>
+        <label class="check"><input type="radio" name="markall-age" value="86400000"> Older than 1 day</label>
+        <label class="check"><input type="radio" name="markall-age" value="259200000"> Older than 3 days</label>
+        <label class="check"><input type="radio" name="markall-age" value="604800000"> Older than 1 week</label>
+        <label class="check"><input type="radio" name="markall-age" value="2592000000"> Older than 1 month</label>
+      </div>
+    </div>
+    <div class="dlg-foot"><button value="cancel">Cancel</button><button value="ok" class="primary" id="markall-ok">Mark as read</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlg-confirm">
   <form method="dialog">
     <div class="dlg-body" style="padding-top:18px"><div id="confirm-text"></div><label class="check" id="confirm-extra" hidden><input type="checkbox" id="confirm-check"> <span></span></label></div>
@@ -156,8 +181,10 @@
       <span><kbd>f</kbd></span><span>Load full article</span>
       <span><kbd>c</kbd></span><span>Copy post link</span>
       <span>Middle-click / <kbd>Ctrl</kbd>+click, or <kbd>x</kbd></span><span>Select post to open later</span>
-      <span><kbd>Shift</kbd>+<kbd>O</kbd></span><span>Open all selected posts in background tabs</span>
-      <span><kbd>Shift</kbd>+<kbd>A</kbd></span><span>Mark all in view as read</span>
+      <span><kbd>Shift</kbd>+middle-click</span><span>Select every post between the last selected one and this one</span>
+      <span><kbd>Shift</kbd>+<kbd>X</kbd></span><span>Select all unread posts in this view</span>
+      <span><kbd>Shift</kbd>+<kbd>O</kbd></span><span>Open selected posts in background tabs</span>
+      <span><kbd>Shift</kbd>+<kbd>A</kbd></span><span>Mark all in view as read (everything, or older than…)</span>
       <span><kbd>u</kbd></span><span>Toggle unread only / all</span>
       <span><kbd>Shift</kbd>+<kbd>J</kbd> / <kbd>K</kbd></span><span>Next / previous feed</span>
       <span><kbd>r</kbd></span><span>Refresh all feeds</span>

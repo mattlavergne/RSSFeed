@@ -1,7 +1,7 @@
 // Reader UI — shared by the toolbar popup (body.popup) and the full-tab reader (body.tab).
 
 import * as db from '../lib/db.js';
-import { getSettings, saveSettings, applyTheme, onSettingsChanged } from '../lib/settings.js';
+import { getSettings, applyTheme, onSettingsChanged } from '../lib/settings.js';
 import { sanitizeHtml } from '../lib/sanitize.js';
 import { escapeHtml, timeAgo, formatDate, hostOf, debounce, uid, iconImg, attachIconFallbacks, displayUrl } from '../lib/util.js';
 import { icon, hydrateIcons } from './icons.js';
@@ -147,18 +147,21 @@ function parseKey(key) {
   return id ? { type, id } : { type };
 }
 
+const isSnoozed = (f) => f.snoozedUntil > Date.now();
+
 function feedRow(f) {
   const err = f.lastError ? `<span class="err" title="${escapeHtml(f.lastError)}">${icon('alert')}</span>` : '';
+  const zz = isSnoozed(f) ? `<span class="zz" title="Snoozed until ${escapeHtml(formatDate(f.snoozedUntil))}">${icon('moon')}</span>` : '';
   const more = `<button class="icon-btn more" data-edit-feed="${f.id}" title="Edit feed">${icon('more')}</button>`;
   return navItem({
-    cls: `feed${f.paused ? ' paused' : ''}`,
+    cls: `feed${f.paused || isSnoozed(f) ? ' paused' : ''}`,
     attrs: `draggable="true" data-feed-id="${escapeHtml(f.id)}"`,
     key: `feed:${f.id}`,
     label: feedTitle(f),
     title: `${feedTitle(f)}\n${displayUrl(f.url)}${f.lastError ? `\n⚠ ${f.lastError}` : ''}`,
     count: state.counts[f.id] || 0,
     iconHtml: iconImg(f),
-    extra: err + more,
+    extra: zz + err + more,
   });
 }
 
@@ -223,13 +226,14 @@ async function selectView(view) {
 function postRow(p) {
   const feed = feedById(p.feedId);
   const showThumb = state.settings.showImages && state.settings.showThumbnails && p.image;
-  const cls = ['post', p.read ? '' : 'unread', p.highlight ? 'highlight' : '', p.id === state.current ? 'active' : '', state.selected.has(p.id) ? 'selected' : ''].join(' ');
+  const cls = ['post', p.dupOf ? 'dup' : '', p.read ? '' : 'unread', p.highlight ? 'highlight' : '', p.id === state.current ? 'active' : '', state.selected.has(p.id) ? 'selected' : ''].join(' ');
   return `<li class="${cls}" data-id="${escapeHtml(p.id)}">
     <span class="sel-mark">${icon('check')}</span>
     <span class="dot"></span>
     <div class="body">
       <div class="meta">${iconImg(feed)}<span class="feed-name">${escapeHtml(feedTitle(feed))}</span><span>·</span><span title="${escapeHtml(formatDate(p.published))}">${escapeHtml(timeAgo(p.published))}</span></div>
       <div class="title">${escapeHtml(p.title)}</div>
+      ${p.dupOf ? `<div class="dup-note">Duplicate · also in ${escapeHtml(feedTitle(feedById(p.dupFeedId)) || 'another feed')}</div>` : ''}
       ${p.snippet ? `<div class="snippet">${escapeHtml(p.snippet)}</div>` : ''}
     </div>
     ${showThumb ? `<img class="thumb" src="${escapeHtml(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
@@ -296,22 +300,51 @@ function saveSelection() {
   chrome.storage.session.set({ selected: [...state.selected.values()] }).catch(() => {});
 }
 
+const batchCap = () => Number(state.settings.openBatchMax) || Infinity;
+
 function renderSelectBar() {
   const n = state.selected.size;
   $('#select-bar').hidden = n === 0;
   $('#select-count').textContent = `${n} selected`;
-  $('#sel-open').textContent = n === 1 ? 'Open 1 post' : `Open ${n} posts`;
+  const cap = batchCap();
+  $('#sel-open').textContent = n > cap ? `Open ${cap} of ${n}` : n === 1 ? 'Open 1 post' : `Open ${n} posts`;
 }
 
-function toggleSelect(id) {
+let lastToggledId = null;
+
+/** Toggle one post; with range, select every post between the last toggled one and this one. */
+function toggleSelect(id, { range = false } = {}) {
   const p = state.posts.find((x) => x.id === id);
   if (!p) return;
-  if (state.selected.has(id)) state.selected.delete(id);
+  const from = state.posts.findIndex((x) => x.id === lastToggledId);
+  if (range && from >= 0) {
+    const to = state.posts.indexOf(p);
+    for (const q of state.posts.slice(Math.min(from, to), Math.max(from, to) + 1)) {
+      if (q.link && !state.selected.has(q.id)) state.selected.set(q.id, { id: q.id, link: q.link });
+      updatePostRow(q);
+    }
+  } else if (state.selected.has(id)) state.selected.delete(id);
   else if (!p.link) { toast('This post has no link to open'); return; }
   else state.selected.set(id, { id, link: p.link });
+  lastToggledId = id;
   updatePostRow(p);
   saveSelection();
   renderSelectBar();
+}
+
+/** Select every unread post in the current view (all pages, not just the loaded ones). */
+async function selectAllUnread() {
+  const { posts } = await db.queryPosts(currentQuery({ filter: state.view.type === 'starred' ? 'starred' : 'unread', offset: 0, limit: 100000 }));
+  let added = 0;
+  for (const p of posts) {
+    if (!p.link || state.selected.has(p.id)) continue;
+    state.selected.set(p.id, { id: p.id, link: p.link });
+    added++;
+  }
+  state.posts.forEach(updatePostRow);
+  saveSelection();
+  renderSelectBar();
+  toast(added ? `Selected ${added} post${added === 1 ? '' : 's'}` : 'Nothing unread to select here');
 }
 
 function clearSelection() {
@@ -327,11 +360,17 @@ async function openSelected() {
   const order = new Map(state.posts.map((p, i) => [p.id, i]));
   const items = [...state.selected.values()].sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
   if (!items.length) return;
-  if (items.length > 20 && !(await confirmDialog(`Open ${items.length} tabs at once?`, { ok: `Open ${items.length} tabs` }))) return;
-  for (const it of items) await chrome.tabs.create({ url: it.link, active: false });
-  clearSelection();
-  await markRead(items.map((it) => it.id), true);
-  toast(`Opened ${items.length} tab${items.length === 1 ? '' : 's'}`);
+  const batch = items.slice(0, batchCap());
+  if (batch.length > 20 && !(await confirmDialog(`Open ${batch.length} tabs at once?`, { ok: `Open ${batch.length} tabs` }))) return;
+  for (const it of batch) await chrome.tabs.create({ url: it.link, active: false });
+  // Opened posts leave the selection; the rest wait for the next batch.
+  for (const it of batch) state.selected.delete(it.id);
+  for (const it of batch) { const p = state.posts.find((x) => x.id === it.id); if (p) updatePostRow(p); }
+  saveSelection();
+  renderSelectBar();
+  await markRead(batch.map((it) => it.id), true);
+  const left = items.length - batch.length;
+  toast(`Opened ${batch.length} tab${batch.length === 1 ? '' : 's'}${left ? ` · ${left} still selected` : ''}`);
 }
 
 let scrollObserver = null;
@@ -385,18 +424,35 @@ async function toggleStar(id) {
   toast(next ? 'Starred' : 'Removed from starred');
 }
 
+function askMarkAllAge(label) {
+  const dlg = $('#dlg-markall');
+  $('#markall-scope').textContent = `In “${label}”, mark as read:`;
+  $('#dlg-markall input[name="markall-age"][value="0"]').checked = true;
+  dlg.returnValue = '';
+  dlg.showModal();
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => {
+      if (dlg.returnValue !== 'ok') return resolve(null);
+      return resolve(Number($('#dlg-markall input[name="markall-age"]:checked')?.value || 0));
+    }, { once: true });
+  });
+}
+
 async function markAllInView() {
   const q = currentQuery();
   const label = $('#view-title').textContent;
+  let age = 0; // ms; 0 = everything
   if (state.settings.markAllConfirm) {
-    const ok = await confirmDialog(`Mark all posts in “${label}” as read?`, { ok: 'Mark as read', checkbox: 'Don’t ask again' });
-    if (!ok) return;
-    if (ok.checked) state.settings = await saveSettings({ markAllConfirm: false });
+    age = await askMarkAllAge(label);
+    if (age === null) return;
   }
+  const olderThan = age ? Date.now() - age : Infinity;
   let changed;
-  if (state.search || q.filter === 'starred') changed = await db.setRead(await db.queryAllIds({ ...q, filter: q.filter === 'starred' ? 'starred' : 'unread' }), true);
-  else changed = await db.markAllRead(q.feedIds);
-  state.posts.forEach((p) => { p.read = 1; updatePostRow(p); });
+  if (state.search || q.filter === 'starred') {
+    const { posts } = await db.queryPosts({ ...q, filter: q.filter === 'starred' ? 'starred' : 'unread', offset: 0, limit: 100000 });
+    changed = await db.setRead(posts.filter((p) => p.published <= olderThan).map((p) => p.id), true);
+  } else changed = await db.markAllRead(q.feedIds, { olderThan });
+  state.posts.forEach((p) => { if (p.published <= olderThan) { p.read = 1; updatePostRow(p); } });
   await loadCounts();
   send('unreadChanged').catch(() => {});
   toast(`Marked ${changed} post${changed === 1 ? '' : 's'} as read`);
@@ -469,6 +525,7 @@ async function renderArticle(p = null) {
         ${p.author ? `<span>· ${escapeHtml(p.author)}</span>` : ''}
         <span>· ${escapeHtml(formatDate(p.published))}</span>
         ${p.highlight ? '<span class="tag">Rule match</span>' : ''}
+        ${p.dupOf ? `<span class="tag muted-tag" title="The same story arrived earlier from another feed, so this copy was marked read">Duplicate of ${escapeHtml(feedTitle(feedById(p.dupFeedId)) || 'another feed')}</span>` : ''}
       </div>
       <h1><a href="${escapeHtml(p.link || '#')}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.title)}</a></h1>
       <div class="content"></div>
@@ -711,6 +768,14 @@ function openFeedDialog(id) {
   $('#feed-notify').value = f.notify === true ? 'on' : f.notify === false ? 'off' : '';
   $('#feed-full').checked = !!f.fullArticle;
   $('#feed-paused').checked = !!f.paused;
+  const snoozed = isSnoozed(f);
+  $('#feed-snooze').innerHTML = (snoozed
+    ? `<option value="keep">Until ${escapeHtml(formatDate(f.snoozedUntil))}</option><option value="">Wake up now</option>`
+    : '<option value="">Not snoozed</option>')
+    + '<option value="1">Snooze for 1 day</option><option value="3">Snooze for 3 days</option><option value="7">Snooze for 1 week</option><option value="30">Snooze for 1 month</option>';
+  $('#feed-snooze').value = snoozed ? 'keep' : '';
+  $('#feed-snooze-markread').checked = true;
+  $('#feed-snooze-opts').hidden = true;
   $('#feed-info').innerHTML = [
     f.siteUrl ? `<div>Website: <a href="${escapeHtml(f.siteUrl)}" target="_blank" rel="noopener">${escapeHtml(f.siteUrl)}</a></div>` : '',
     `<div>Added ${escapeHtml(formatDate(f.addedAt))}</div>`,
@@ -738,13 +803,21 @@ async function saveFeedDialog() {
     paused: $('#feed-paused').checked,
     m: Date.now(),
   };
+  const snooze = $('#feed-snooze').value;
+  let snoozeMarked = 0;
+  if (snooze === '') patch.snoozedUntil = 0;
+  else if (snooze !== 'keep') {
+    patch.snoozedUntil = Date.now() + Number(snooze) * 86400000;
+    if ($('#feed-snooze-markread').checked) snoozeMarked = await db.markAllRead([f.id]);
+  }
   if (url !== f.url) Object.assign(patch, { etag: '', lastModified: '', lastError: '', errorCount: 0 });
   await db.updateFeed(f.id, patch);
   $('#dlg-feed').close();
   await loadFeeds();
   send('subscriptionsChanged').catch(() => {});
   if (url !== f.url) send('refresh', { feedIds: [f.id] }).catch(() => {});
-  toast('Feed saved');
+  if (snoozeMarked) { send('unreadChanged').catch(() => {}); if (state.filter === 'unread') loadPosts(); }
+  toast(patch.snoozedUntil ? `Snoozed until ${formatDate(patch.snoozedUntil)}` : 'Feed saved');
 }
 
 async function deleteFeedFlow(id) {
@@ -947,7 +1020,7 @@ function bindEvents() {
     const star = e.target.closest('[data-star]');
     if (star) { e.stopPropagation(); return toggleStar(star.dataset.star); }
     const li = e.target.closest('li[data-id]');
-    if (li && (e.ctrlKey || e.metaKey)) { e.preventDefault(); return toggleSelect(li.dataset.id); }
+    if (li && (e.ctrlKey || e.metaKey)) { e.preventDefault(); return toggleSelect(li.dataset.id, { range: e.shiftKey }); }
     if (li) return openPost(li.dataset.id, { scroll: false });
     return undefined;
   });
@@ -963,9 +1036,10 @@ function bindEvents() {
       const p = state.posts.find((x) => x.id === li.dataset.id);
       if (p?.link) { openLink(p.link, { active: false }); markRead([p.id], true); }
     } else {
-      toggleSelect(li.dataset.id);
+      toggleSelect(li.dataset.id, { range: e.shiftKey });
     }
   });
+  $('#btn-select-all').addEventListener('click', selectAllUnread);
   $('#sel-open').addEventListener('click', openSelected);
   $('#sel-clear').addEventListener('click', clearSelection);
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -1042,6 +1116,7 @@ function bindEvents() {
     saveFeedDialog();
   });
   $('#feed-folder').addEventListener('change', (e) => { $('#feed-new-folder').hidden = e.target.value !== '__new'; });
+  $('#feed-snooze').addEventListener('change', (e) => { $('#feed-snooze-opts').hidden = !/^\d+$/.test(e.target.value); });
   $('#feed-delete').addEventListener('click', () => deleteFeedFlow(editingFeedId));
   $('#feed-markread').addEventListener('click', async () => {
     const n = await db.markAllRead([editingFeedId]);
@@ -1104,6 +1179,7 @@ function bindEvents() {
     const listAffecting = ['sort', 'showImages', 'showThumbnails', 'density', 'markReadOnScroll'].some((k) => s[k] !== state.settings[k]);
     state.settings = s;
     applyTheme(s);
+    renderSelectBar();
     if (listAffecting) loadPosts();
   });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(state.settings));
@@ -1136,6 +1212,7 @@ function onKey(e) {
     J: () => moveFeed(1), K: () => moveFeed(-1),
     o: () => p && openLink(p.link), Enter: () => p && openLink(p.link), v: () => p && openLink(p.link, { active: true }),
     x: () => p && toggleSelect(p.id),
+    X: () => selectAllUnread(),
     O: () => openSelected(),
     m: () => p && markRead([p.id], !p.read),
     s: () => p && toggleStar(p.id),

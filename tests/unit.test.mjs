@@ -103,3 +103,80 @@ test('util helpers', async () => {
   assert.equal(max, 2);
   assert.deepEqual(res.map((r) => r.ok), [true, true, false, true, true]);
 });
+
+// ---------- duplicates, popular sites, feed health ----------
+import { linkKey, titleKey } from '../extension/lib/util.js';
+import { siteFeedCandidates } from '../extension/lib/sites.js';
+import { assessFeeds } from '../extension/lib/health.js';
+
+test('linkKey: same story URL matches despite tracking params, www, scheme, slash and hash', () => {
+  const k = linkKey('https://www.example.com/news/story-1/?utm_source=rss&utm_medium=feed#comments');
+  assert.equal(k, 'example.com/news/story-1');
+  assert.equal(linkKey('http://example.com/news/story-1'), k);
+  assert.equal(linkKey('https://example.com/news/story-1?fbclid=abc'), k);
+  assert.notEqual(linkKey('https://example.com/news/story-2'), k);
+  assert.equal(linkKey('https://example.com/item?id=1&b=2'), linkKey('https://example.com/item?b=2&id=1'));
+  assert.notEqual(linkKey('https://news.ycombinator.com/item?id=1'), linkKey('https://news.ycombinator.com/item?id=2'));
+  assert.equal(linkKey('https://example.com/'), '', 'homepage links are not distinctive');
+  assert.equal(linkKey(''), '');
+  assert.equal(linkKey('mailto:x@y.z'), '');
+});
+
+test('titleKey: ignores case, punctuation and accents; short titles are not compared', () => {
+  const k = titleKey('Apple Announces “New” MacBook Pro — With M6 Chip!');
+  assert.equal(k, titleKey('apple announces new macbook pro with m6 chip'));
+  assert.equal(titleKey('Café opens in Zürich after long renovation'), titleKey('Cafe opens in Zurich after long renovation'));
+  assert.equal(titleKey('Weekly update'), '');
+});
+
+test('siteFeedCandidates: maps popular sites to their hidden feeds', () => {
+  const first = (u) => siteFeedCandidates(u)[0]?.url;
+  assert.equal(first('https://www.reddit.com/r/programming/'), 'https://www.reddit.com/r/programming/.rss');
+  assert.equal(first('https://old.reddit.com/r/rust/top/?t=week'), 'https://www.reddit.com/r/rust/top/.rss');
+  assert.equal(first('https://reddit.com/u/spez'), 'https://www.reddit.com/user/spez/.rss');
+  assert.deepEqual(siteFeedCandidates('https://github.com/mozilla/readability').map((c) => c.url), [
+    'https://github.com/mozilla/readability/releases.atom',
+    'https://github.com/mozilla/readability/tags.atom',
+    'https://github.com/mozilla/readability/commits.atom',
+  ]);
+  assert.equal(first('https://github.com/torvalds'), 'https://github.com/torvalds.atom');
+  assert.equal(first('https://www.youtube.com/playlist?list=PLx'), 'https://www.youtube.com/feeds/videos.xml?playlist_id=PLx');
+  assert.equal(first('https://www.youtube.com/channel/UCabc'), 'https://www.youtube.com/feeds/videos.xml?channel_id=UCabc');
+  assert.equal(first('https://mastodon.social/@Gargron'), 'https://mastodon.social/@Gargron.rss');
+  assert.equal(first('https://bsky.app/profile/someone.bsky.social'), 'https://bsky.app/profile/someone.bsky.social/rss');
+  assert.equal(first('https://medium.com/@someone'), 'https://medium.com/feed/@someone');
+  assert.equal(first('https://writer.substack.com/p/a-post'), 'https://writer.substack.com/feed');
+  assert.equal(first('https://artist.tumblr.com/'), 'https://artist.tumblr.com/rss');
+  assert.deepEqual(siteFeedCandidates('https://example.com/blog'), []);
+  assert.deepEqual(siteFeedCandidates('not a url'), []);
+});
+
+test('assessFeeds: flags failing, inactive and noisy feeds', () => {
+  const DAY = 86400000, now = Date.UTC(2026, 10, 2);
+  const feed = (id, o = {}) => ({ id, addedAt: now - 200 * DAY, lastSuccess: now, errorCount: 0, lastError: '', ...o });
+  const feeds = [
+    feed('quiet'), feed('normal1'), feed('normal2'), feed('firehose'),
+    feed('broken', { lastError: 'HTTP 500', errorCount: 4 }),
+    feed('blip', { lastError: 'Timed out', errorCount: 1, lastSuccess: now - DAY }),
+    feed('new', { addedAt: now - 2 * DAY }),
+  ];
+  const stats = {
+    quiet: { recent: 0, latest: now - 120 * DAY, total: 5, unread: 0 },
+    normal1: { recent: 12, latest: now - DAY, total: 40, unread: 3, complete: true },
+    normal2: { recent: 8, latest: now - DAY, total: 30, unread: 1, complete: true },
+    // Only 4 days of history stored (the feed document holds its latest 60 items).
+    firehose: { recent: 60, latest: now, total: 60, unread: 50, oldest: now - 4 * DAY, complete: false },
+    broken: { recent: 4, latest: now - 5 * DAY, total: 10, unread: 0 },
+    blip: { recent: 4, latest: now - DAY, total: 10, unread: 0 },
+  };
+  const rows = Object.fromEntries(assessFeeds(feeds, stats, { now }).map((r) => [r.feed.id, r]));
+  assert.equal(rows.quiet.inactive, true);
+  assert.equal(rows.normal1.inactive, false);
+  assert.equal(rows.firehose.noisy, true);
+  assert.ok(Math.abs(rows.firehose.perWeek - 105) < 0.01, `60 posts over 4 days ≈ 105/week, got ${rows.firehose.perWeek}`);
+  assert.equal(rows.normal1.noisy, false);
+  assert.equal(rows.broken.failing, true);
+  assert.equal(rows.blip.failing, false, 'a single recent error is not "failing"');
+  assert.equal(rows.new.inactive, false, 'brand-new feeds are not inactive');
+  assert.ok(Math.abs(rows.normal1.perWeek - 2.8) < 0.01);
+});

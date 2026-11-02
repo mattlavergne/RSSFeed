@@ -149,3 +149,31 @@ export function downloadText(filename, text, type = 'text/plain') {
 export function dateStamp(d = new Date()) {
   return d.toISOString().slice(0, 10);
 }
+
+// ---------- duplicate detection keys ----------
+
+const TRACKING_PARAMS = /^(utm_[a-z]+|fbclid|gclid|dclid|mc_cid|mc_eid|ref|ref_src|source|cmpid|ocid|_hsenc|_hsmi|igshid|si)$/i;
+
+/** Canonical form of an article URL: no scheme/www/hash/tracking params/trailing slash. '' if unusable. */
+export function linkKey(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) return '';
+    const params = [...u.searchParams].filter(([k]) => !TRACKING_PARAMS.test(k)).sort(([a], [b]) => a.localeCompare(b));
+    const query = params.length ? `?${new URLSearchParams(params)}` : '';
+    const path = u.pathname.replace(/\/+$/, '') || '/';
+    if (path === '/' && !query) return ''; // a bare homepage link says nothing about the story
+    return `${u.hostname.replace(/^www\./, '').toLowerCase()}${path}${query}`;
+  } catch { return ''; }
+}
+
+/** Canonical form of a headline: lowercase, no punctuation/quotes. '' if too short to be distinctive. */
+export function titleKey(title) {
+  const t = String(title || '')
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  return t.length >= 25 ? t : '';
+}

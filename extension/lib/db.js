@@ -5,26 +5,54 @@
 //   folders {id, name, order, collapsed}
 //   posts   lightweight post metadata (list rendering, counts, search)
 //   content heavy HTML bodies, keyed by post id
+//
+// v2: posts get lkey/tkey (normalised link/title) indexes for duplicate detection.
+
+import { linkKey, titleKey } from './util.js';
 
 const DB_NAME = 'tributary';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const DAY = 86400000;
+
+/** Add the duplicate-detection keys to a post record (in place). Missing keys stay out of the index. */
+export function withDedupeKeys(p) {
+  const lk = linkKey(p.link);
+  const tk = titleKey(p.title);
+  if (lk) p.lkey = lk; else delete p.lkey;
+  if (tk) p.tkey = tk; else delete p.tkey;
+  return p;
+}
 let dbPromise = null;
 
 export function openDB() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (e) => {
         const db = req.result;
-        db.createObjectStore('feeds', { keyPath: 'id' });
-        db.createObjectStore('folders', { keyPath: 'id' });
-        const posts = db.createObjectStore('posts', { keyPath: 'id' });
-        posts.createIndex('feedId', 'feedId');
-        posts.createIndex('feedPublished', ['feedId', 'published']);
-        posts.createIndex('feedRead', ['feedId', 'read']);
-        posts.createIndex('read', 'read');
-        posts.createIndex('starred', 'starred');
-        db.createObjectStore('content', { keyPath: 'id' });
+        if (e.oldVersion < 1) {
+          db.createObjectStore('feeds', { keyPath: 'id' });
+          db.createObjectStore('folders', { keyPath: 'id' });
+          const posts = db.createObjectStore('posts', { keyPath: 'id' });
+          posts.createIndex('feedId', 'feedId');
+          posts.createIndex('feedPublished', ['feedId', 'published']);
+          posts.createIndex('feedRead', ['feedId', 'read']);
+          posts.createIndex('read', 'read');
+          posts.createIndex('starred', 'starred');
+          db.createObjectStore('content', { keyPath: 'id' });
+        }
+        if (e.oldVersion < 2) {
+          const posts = req.transaction.objectStore('posts');
+          posts.createIndex('lkey', 'lkey');
+          posts.createIndex('tkey', 'tkey');
+          // Back-fill keys for posts stored before this version.
+          posts.openCursor().onsuccess = (ev) => {
+            const cursor = ev.target.result;
+            if (!cursor) return;
+            cursor.update(withDedupeKeys({ ...cursor.value }));
+            cursor.continue();
+          };
+        }
       };
       req.onsuccess = () => {
         const db = req.result;
@@ -131,18 +159,44 @@ export function deleteFolder(id, { deleteFeeds = false } = {}) {
 // ---------- posts ----------
 
 /**
+ * Find an earlier post that is the same story: same canonical link (any feed, within 30 days)
+ * or the same headline from a different feed (within 3 days).
+ */
+async function findDuplicate(store, meta) {
+  const near = (other, days) => other.id !== meta.id && Math.abs((other.published || 0) - (meta.published || 0)) <= days * DAY;
+  if (meta.lkey) {
+    const same = await reqP(store.index('lkey').getAll(IDBKeyRange.only(meta.lkey), 20));
+    const hit = same.find((o) => near(o, 30));
+    if (hit) return hit;
+  }
+  if (meta.tkey) {
+    const same = await reqP(store.index('tkey').getAll(IDBKeyRange.only(meta.tkey), 20));
+    const hit = same.find((o) => o.feedId !== meta.feedId && near(o, 3));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
  * Insert new posts, update changed ones (keeping read/starred state).
+ * With dedupe, a new post that duplicates an existing story is stored as read with dupOf/dupFeedId set.
+ * Checking inside the write transaction keeps concurrent feed refreshes from both treating a story as new.
  * @returns {Promise<object[]>} the newly added post metadata records
  */
-export function addPosts(posts) {
+export function addPosts(posts, { dedupe = false } = {}) {
   return tx(['posts', 'content'], 'readwrite', async (t) => {
     const store = t.objectStore('posts');
     const content = t.objectStore('content');
     const added = [];
     for (const p of posts) {
       const { contentHtml = '', ...meta } = p;
+      withDedupeKeys(meta);
       const existing = await reqP(store.get(p.id));
       if (!existing) {
+        if (dedupe) {
+          const dup = await findDuplicate(store, meta);
+          if (dup) Object.assign(meta, { read: 1, dupOf: dup.id, dupFeedId: dup.feedId });
+        }
         store.put(meta);
         content.put({ id: p.id, html: contentHtml });
         added.push(meta);
@@ -152,6 +206,7 @@ export function addPosts(posts) {
           title: meta.title, link: meta.link || existing.link, author: meta.author,
           snippet: meta.snippet, text: meta.text, image: meta.image, enclosures: meta.enclosures,
           chash: meta.chash, updatedAt: Date.now(),
+          ...(meta.lkey ? { lkey: meta.lkey } : {}), ...(meta.tkey ? { tkey: meta.tkey } : {}),
         });
         content.put({ id: p.id, html: contentHtml });
       }
@@ -291,6 +346,34 @@ export function getUnreadCounts(feedIds) {
 
 export const getTotalUnread = () => tx('posts', 'readonly', (t) => reqP(t.objectStore('posts').index('read').count(IDBKeyRange.only(0))));
 export const getStarredCount = () => tx('posts', 'readonly', (t) => reqP(t.objectStore('posts').index('starred').count(IDBKeyRange.only(1))));
+
+/**
+ * Per-feed statistics for the health report.
+ * @returns {Promise<Record<string,{recent:number,latest:number,total:number,unread:number}>>}
+ */
+export function getFeedStats(feedIds, { windowDays = 30 } = {}) {
+  const cutoff = Date.now() - windowDays * DAY;
+  return tx('posts', 'readonly', async (t) => {
+    const s = t.objectStore('posts');
+    const out = {};
+    for (const fid of feedIds) {
+      // oldest = oldest post inside the window; complete = stored history reaches back past the window.
+      const st = { recent: 0, latest: 0, total: 0, unread: 0, oldest: 0, complete: false };
+      st.total = await reqP(s.index('feedId').count(IDBKeyRange.only(fid)));
+      st.unread = await reqP(s.index('feedRead').count(IDBKeyRange.only([fid, 0])));
+      await eachCursor(s.index('feedPublished'), feedRange(fid), 'prev', (cursor) => {
+        const p = cursor.value;
+        if (!st.latest) st.latest = p.published;
+        if (p.published < cutoff) { st.complete = true; return false; }
+        st.recent++;
+        st.oldest = p.published;
+        return true;
+      });
+      out[fid] = st;
+    }
+    return out;
+  });
+}
 
 export function getStarredPosts() {
   return tx(['posts', 'content'], 'readonly', async (t) => {

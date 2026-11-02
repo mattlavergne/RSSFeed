@@ -17,15 +17,20 @@ Tributary is a browser-extension RSS reader with the features you'd normally pay
 - Podcast/video enclosures play inline; images, thumbnails, light/dark/system theme, font size, serif/sans, compact list
 - Keyboard shortcuts (`j`/`k`, `o`, `m`, `s`, `f`, `Shift+A`, `/`, `?` …) and a global shortcut to open the popup (`Alt+Shift+R`)
 - Mark read on open or on scroll; "mark all as read" per feed, folder, search or everything
-- **Batch open**: middle-click (or Ctrl/⌘-click, or `x`) posts to select them, then *Open all* (`Shift+O`) opens them as background tabs in list order and marks them read. The selection survives the popup closing.
+- **Batch open**: middle-click (or Ctrl/⌘-click, or `x`) posts to select them — Shift+middle-click selects a range, the ☑ button (`Shift+X`) selects every unread post in the view — then *Open* (`Shift+O`) opens them as background tabs in list order and marks them read. At most 10 tabs per batch by default (configurable); the rest stay selected. The selection survives the popup closing.
+- **Catch up**: "Mark as read" can mark everything or only posts older than 1 day / 3 days / 1 week / 1 month
+- **Snooze** a noisy feed for a day, 3 days, a week or a month: it isn't checked meanwhile, and anything it publishes during the snooze arrives already read
+- **Duplicate hiding**: when the same story arrives from another feed (same link ignoring tracking parameters, or the same headline), the later copy is marked read and tagged *Duplicate*
 
 **Feeds**
 - RSS 2.0/0.9x, RSS 1.0 (RDF), Atom and JSON Feed; tolerant of malformed XML and non-UTF-8 encodings
 - Paste a website URL and Tributary finds its feeds (`<link rel="alternate">`, then common paths like `/feed`)
+- Knows the hidden feeds of popular sites: paste a Reddit subreddit/user, GitHub repo (releases, tags, commits) or user, YouTube playlist or channel, Mastodon profile or hashtag, Bluesky profile, Medium, Substack or Tumblr URL
 - The toolbar icon gets a green **+** on pages that have a feed; right-click any page or link → *Subscribe in Tributary*
 - Unlimited feeds; refresh every 1 min – 1 day (global default + per-feed override), conditional GET (ETag/Last-Modified), automatic back-off for failing feeds
 - Private feeds via HTTP Basic auth (`https://user:password@host/feed`) or your browser's cookies
 - Drag feeds between folders, rename, pause, per-feed notification settings, error status per feed
+- **Feed health report** (Settings → Feed health): posts per week, last post and unread per feed; flags feeds that keep failing, have gone quiet for 90+ days, or post far more than the rest, with one-click snooze/unsubscribe
 
 **Power features**
 - **Rules / keyword alerts**: match title, content, author or link (contains any of several keywords, does not contain, equals, or regex), scoped to all or some feeds, then *notify*, *highlight*, *star*, *mark read* or *hide*. Preview matches and apply a rule to existing posts.

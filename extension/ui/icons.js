@@ -22,6 +22,8 @@ const P = {
   rss: '<path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.3" fill="currentColor"/>',
   x: '<path d="M18 6L6 18M6 6l12 12"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  selectAll: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><path d="M4.8 6.6l1.5 1.5 2.5-2.7"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M4.8 17.6l1.5 1.5 2.5-2.7"/><path d="M14 6.5h7M14 17.5h7"/>',
   expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13l3.5 7v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',

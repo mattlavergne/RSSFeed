@@ -22,6 +22,8 @@ export const DEFAULT_SETTINGS = {
   syncSubscriptions: true,    // mirror subscriptions & rules to chrome.storage.sync
   markAllConfirm: true,
   middleClick: 'select',      // select | open  (middle-click on a post in the list)
+  openBatchMax: 10,           // max tabs opened per "Open all" (0 = no limit)
+  hideDuplicates: true,       // mark the same story from another feed as read
 };
 
 export async function getSettings() {

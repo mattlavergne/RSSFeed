@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+  <title>Syndicated Copies</title>
+  <link>https://copies.example.net/</link>
+  <item>
+    <title>A different headline for the same article</title>
+    <link>https://www.example.com/first/?utm_source=newsletter&amp;utm_medium=email</link>
+    <guid>c1</guid>
+    <pubDate>Mon, 02 Nov 2026 12:00:00 +0000</pubDate>
+  </item>
+  <item>
+    <title>First Post With Bold Title!</title>
+    <link>https://copies.example.net/republished</link>
+    <guid>c2</guid>
+    <pubDate>Mon, 02 Nov 2026 13:00:00 +0000</pubDate>
+  </item>
+  <item>
+    <title>Something only this feed has to say about things</title>
+    <link>https://copies.example.net/original</link>
+    <guid>c3</guid>
+    <pubDate>Mon, 02 Nov 2026 14:00:00 +0000</pubDate>
+  </item>
+</channel>
+</rss>

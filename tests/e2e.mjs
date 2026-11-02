@@ -85,6 +85,45 @@ await step('welcome screen shows for a fresh install', async () => {
   }
 });
 
+await step('upgrades an existing version-1 database (back-fills duplicate keys)', async () => {
+  const blank = await ctx.newPage();
+  await blank.goto(X('icons/icon16.png'));
+  const result = await blank.evaluate(async () => {
+    const wait = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    await wait(indexedDB.deleteDatabase('tributary'));
+    // Recreate the v1 schema exactly as version 1.0.0 shipped it, with one post in it.
+    const open = indexedDB.open('tributary', 1);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      db.createObjectStore('feeds', { keyPath: 'id' });
+      db.createObjectStore('folders', { keyPath: 'id' });
+      const posts = db.createObjectStore('posts', { keyPath: 'id' });
+      posts.createIndex('feedId', 'feedId');
+      posts.createIndex('feedPublished', ['feedId', 'published']);
+      posts.createIndex('feedRead', ['feedId', 'read']);
+      posts.createIndex('read', 'read');
+      posts.createIndex('starred', 'starred');
+      db.createObjectStore('content', { keyPath: 'id' });
+      posts.put({ id: 'old:1', feedId: 'old', title: 'An old post saved by version one of the app', link: 'https://www.old.example/story/?utm_source=x', published: 1, read: 0, starred: 0 });
+    };
+    const v1 = await wait(open);
+    v1.close();
+    const db = await import('/lib/db.js');
+    const p = await db.getPost('old:1');
+    const conn = await db.openDB();
+    const names = [...conn.transaction('posts').objectStore('posts').indexNames];
+    await wait(conn.transaction('posts', 'readwrite').objectStore('posts').delete('old:1'));
+    return { version: conn.version, lkey: p.lkey, tkey: p.tkey, names };
+  });
+  await blank.close();
+  await page.bringToFront();
+  assert.equal(result.version, 2);
+  assert.equal(result.lkey, 'old.example/story');
+  assert.equal(result.tkey, 'an old post saved by version one of the app');
+  assert.ok(result.names.includes('lkey') && result.names.includes('tkey'));
+  await page.reload();
+});
+
 await step('discover: page with <link rel=alternate> tags', async () => {
   const r = await msg('discover', { url: `${B}/page.html` });
   assert.ok(r.ok, r.error);
@@ -299,7 +338,7 @@ await step('search filters posts', async () => {
 await step('mark all as read in a view', async () => {
   await page.locator('#sidebar .nav-item.feed', { hasText: 'JSON Feed Example' }).click();
   await page.locator('#btn-markall').click();
-  await page.locator('#confirm-ok').click();
+  await page.locator('#markall-ok').click();
   await until(async () => (await page.evaluate(async (id) => (await import('/lib/db.js')).getUnreadCounts([id]), F['JSON Feed Example'].id))[F['JSON Feed Example'].id] === 0, { msg: 'mark all read' });
 });
 
@@ -340,12 +379,14 @@ await step('middle-click selects posts, then "Open all" opens them in background
   await until(() => opened.length === 2, { msg: 'two tabs opened' });
   ctx.off('page', onPage);
   await until(async () => opened.every((p) => p.url().includes('/article.html?')), { msg: 'tab urls' });
-  const urls = opened.map((p) => p.url());
   const links = await page.evaluate(async (ids) => {
     const db = await import('/lib/db.js');
     return Promise.all(ids.map(async (id) => (await db.getPost(id)).link));
   }, ids.slice(0, 2));
-  assert.deepEqual(urls, links, 'tabs should open in list order');
+  // Playwright may report new pages in any order, so check Chrome's actual tab positions.
+  const tabOrder = await page.evaluate(async (links) => (await chrome.tabs.query({}))
+    .filter((t) => links.includes(t.url || t.pendingUrl)).sort((a, b) => a.index - b.index).map((t) => t.url || t.pendingUrl), links);
+  assert.deepEqual(tabOrder, links, 'tabs should open in list order');
   for (const p of opened) await p.close();
   await page.bringToFront();
   assert.equal(await page.locator('#select-bar').isVisible(), false);
@@ -459,6 +500,151 @@ await step('sync: pushes to chrome.storage.sync and applies remote additions', a
   assert.equal(synced.customTitle, 'From other device');
   const folders = await page.evaluate(async () => (await (await import('/lib/db.js')).getAllFolders()).map((f) => f.name));
   assert.ok(folders.includes('Synced'));
+});
+
+await step('batch: select-all unread, Shift+middle-click range, per-batch tab cap', async () => {
+  const dyn = F['Dynamic Feed'].id;
+  await page.evaluate(async (dyn) => {
+    const db = await import('/lib/db.js');
+    const { posts } = await db.queryPosts({ feedIds: [dyn], filter: 'all', limit: 100 });
+    await db.setRead(posts.map((p) => p.id), false);
+    (await import('/lib/settings.js')).saveSettings({ openBatchMax: 2 });
+  }, dyn);
+  await page.reload();
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'Dynamic Feed' }).click();
+  await page.locator('.seg button[data-filter="all"]').click();
+  const rows = page.locator('#post-list li');
+  const n = await rows.count();
+  assert.ok(n >= 3, `need 3+ posts, have ${n}`);
+
+  await page.locator('#btn-select-all').click();
+  await until(async () => (await page.locator('#select-count').innerText()) === `${n} selected`, { msg: 'select all' });
+  assert.equal(await page.locator('#sel-open').innerText(), `Open 2 of ${n}`);
+  const opened = [];
+  const onPage = (p) => opened.push(p);
+  ctx.on('page', onPage);
+  await page.locator('#sel-open').click();
+  await until(() => opened.length === 2, { msg: 'capped batch of 2' });
+  await sleep(300);
+  ctx.off('page', onPage);
+  assert.equal(opened.length, 2);
+  for (const p of opened) await p.close();
+  await page.bringToFront();
+  assert.equal(await page.locator('#select-count').innerText(), `${n - 2} selected`);
+  await page.locator('#sel-clear').click();
+
+  // Range: middle-click the first, Shift+middle-click the third → three selected.
+  await rows.nth(0).click({ button: 'middle' });
+  await rows.nth(2).click({ button: 'middle', modifiers: ['Shift'] });
+  assert.equal(await page.locator('#select-count').innerText(), '3 selected');
+  await page.locator('#sel-clear').click();
+  await page.evaluate(async () => (await import('/lib/settings.js')).saveSettings({ openBatchMax: 10 }));
+});
+
+await step('catch-up: mark only posts older than a week as read', async () => {
+  const dyn = F['Dynamic Feed'].id;
+  const ids = await page.evaluate(async (dyn) => {
+    const db = await import('/lib/db.js');
+    const { posts } = await db.queryPosts({ feedIds: [dyn], filter: 'all', limit: 100 });
+    await db.setRead(posts.map((p) => p.id), false);
+    const old = posts.slice(0, 2).map((p) => p.id);
+    for (const id of old) await db.updatePost(id, { published: Date.now() - 10 * 86400000 });
+    for (const p of posts.slice(2)) await db.updatePost(p.id, { published: Date.now() - 3600000 });
+    return { old, recent: posts.slice(2).map((p) => p.id) };
+  }, dyn);
+  await page.reload();
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'Dynamic Feed' }).click();
+  await page.locator('#btn-markall').click();
+  await page.locator('#dlg-markall input[value="604800000"]').check();
+  await page.locator('#markall-ok').click();
+  const state = await until(async () => {
+    const r = await page.evaluate(async (all) => {
+      const db = await import('/lib/db.js');
+      return Promise.all(all.map(async (id) => (await db.getPost(id)).read));
+    }, [...ids.old, ...ids.recent]);
+    return r.slice(0, 2).every((x) => x === 1) ? r : null;
+  }, { msg: 'old posts read' });
+  assert.deepEqual(state.slice(2), ids.recent.map(() => 0), 'recent posts must stay unread');
+});
+
+await step('snooze: skipped by refreshes, posts during snooze arrive read, wakes up afterwards', async () => {
+  const dyn = F['Dynamic Feed'].id;
+  // Snooze through the feed dialog.
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'Dynamic Feed' }).hover();
+  await page.locator(`#sidebar [data-edit-feed="${dyn}"]`).click();
+  await page.locator('#feed-snooze').selectOption('7');
+  assert.equal(await page.locator('#feed-snooze-opts').isVisible(), true);
+  await page.locator('#feed-save').click();
+  await until(async () => (await page.locator(`#sidebar [data-feed-id="${dyn}"] .zz`).count()) === 1, { msg: 'snooze icon' });
+  const feed = await page.evaluate(async (id) => (await import('/lib/db.js')).getFeed(id), dyn);
+  assert.ok(feed.snoozedUntil > Date.now() + 6 * 86400000);
+  const unread = await page.evaluate(async (id) => (await import('/lib/db.js')).getUnreadCounts([id]), dyn);
+  assert.equal(unread[dyn], 0, 'snoozing marks current unread as read');
+
+  const hits = srv.hits['/dynamic.xml'];
+  await msg('refresh', { force: false });
+  assert.equal(srv.hits['/dynamic.xml'], hits, 'refresh-all must skip snoozed feeds');
+
+  await fetch(`${B}/dynamic/add?title=${encodeURIComponent('Posted while snoozed')}`);
+  await msg('refresh', { feedIds: [dyn], force: false });
+  const during = await page.evaluate(async (id) => {
+    const db = await import('/lib/db.js');
+    return (await db.queryPosts({ feedIds: [id], filter: 'all', limit: 100 })).posts.find((p) => p.title === 'Posted while snoozed');
+  }, dyn);
+  assert.equal(during.read, 1);
+
+  // Snooze over: new posts are unread again and the snooze is cleared.
+  await page.evaluate(async (id) => (await import('/lib/db.js')).updateFeed(id, { snoozedUntil: Date.now() - 1000 }), dyn);
+  await fetch(`${B}/dynamic/add?title=${encodeURIComponent('Posted after waking')}`);
+  await msg('refresh', { feedIds: [dyn], force: false });
+  const after = await page.evaluate(async (id) => {
+    const db = await import('/lib/db.js');
+    return { post: (await db.queryPosts({ feedIds: [id], filter: 'all', limit: 100 })).posts.find((p) => p.title === 'Posted after waking'), feed: await db.getFeed(id) };
+  }, dyn);
+  assert.equal(after.post.read, 0);
+  assert.equal(after.feed.snoozedUntil, 0);
+});
+
+await step('duplicates: same link (tracking params) or same headline from another feed is marked read', async () => {
+  const r = await msg('subscribe', { url: `${B}/dup.xml` });
+  assert.ok(r.ok, r.error);
+  const original = (await postsOf(F['Example & Co Blog'].id)).find((p) => p.link === 'https://example.com/first');
+  const copies = await postsOf(r.feed.id);
+  const byGuid = Object.fromEntries(copies.map((p) => [p.guid, p]));
+  assert.equal(byGuid.c1.dupOf, original.id, 'link duplicate');
+  assert.equal(byGuid.c1.read, 1);
+  assert.equal(byGuid.c2.dupOf, original.id, 'headline duplicate');
+  assert.equal(byGuid.c2.dupFeedId, F['Example & Co Blog'].id);
+  assert.equal(byGuid.c3.dupOf, undefined);
+  assert.equal(byGuid.c3.read, 0);
+  await page.reload();
+  await page.locator('#sidebar .nav-item.feed', { hasText: 'Syndicated Copies' }).click();
+  await page.locator('.seg button[data-filter="all"]').click();
+  await until(async () => (await page.locator('#post-list li.dup').count()) === 2, { msg: 'duplicate rows' });
+  assert.match(await page.locator('#post-list li.dup .dup-note').first().innerText(), /also in Example & Co Blog/);
+});
+
+await step('feed health report flags failing feeds and can snooze from the table', async () => {
+  const id = F['Café Latin1'].id;
+  await page.evaluate(async (id) => (await import('/lib/db.js')).updateFeed(id, { lastError: 'HTTP 500 Internal Server Error', errorCount: 5 }), id);
+  const opts = await ctx.newPage();
+  opts.on('pageerror', (e) => pageErrors.push(`options: ${e.message}`));
+  await opts.goto(X('options.html#health'));
+  await opts.waitForSelector('#health-body tr[data-id]');
+  const total = (await page.evaluate(async () => (await import('/lib/db.js')).getAllFeeds())).length;
+  assert.equal(await opts.locator('#health-body tr[data-id]').count(), total);
+  assert.equal(await opts.locator(`#health-body tr[data-id="${id}"] .badge.failing`).count(), 1);
+  await opts.locator('#health-filter').selectOption('failing');
+  assert.equal(await opts.locator('#health-body tr[data-id]').count(), 1);
+  if (wantShots) {
+    await opts.locator('#health-filter').selectOption('all');
+    await opts.screenshot({ path: path.join(SHOTS, 'options-health.png') });
+    await opts.locator('#health-filter').selectOption('failing');
+  }
+  await opts.locator(`#health-body tr[data-id="${id}"] .h-snooze`).click();
+  await until(async () => (await opts.locator(`#health-body tr[data-id="${id}"] .badge.snoozed`).count()) === 1, { msg: 'snoozed badge' });
+  await opts.close();
+  await page.bringToFront();
 });
 
 await step('unsubscribe removes the feed and its posts', async () => {
