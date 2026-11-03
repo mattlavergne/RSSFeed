@@ -26,43 +26,53 @@ let dbPromise = null;
 
 export function openDB() {
   if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
-      req.onupgradeneeded = (e) => {
-        const db = req.result;
-        if (e.oldVersion < 1) {
-          db.createObjectStore('feeds', { keyPath: 'id' });
-          db.createObjectStore('folders', { keyPath: 'id' });
-          const posts = db.createObjectStore('posts', { keyPath: 'id' });
-          posts.createIndex('feedId', 'feedId');
-          posts.createIndex('feedPublished', ['feedId', 'published']);
-          posts.createIndex('feedRead', ['feedId', 'read']);
-          posts.createIndex('read', 'read');
-          posts.createIndex('starred', 'starred');
-          db.createObjectStore('content', { keyPath: 'id' });
-        }
-        if (e.oldVersion < 2) {
-          const posts = req.transaction.objectStore('posts');
-          posts.createIndex('lkey', 'lkey');
-          posts.createIndex('tkey', 'tkey');
-          // Back-fill keys for posts stored before this version.
-          posts.openCursor().onsuccess = (ev) => {
-            const cursor = ev.target.result;
-            if (!cursor) return;
-            cursor.update(withDedupeKeys({ ...cursor.value }));
-            cursor.continue();
-          };
-        }
-      };
-      req.onsuccess = () => {
-        const db = req.result;
-        db.onversionchange = () => { db.close(); dbPromise = null; };
-        resolve(db);
-      };
-      req.onerror = () => { dbPromise = null; reject(req.error); };
-    });
+    dbPromise = openAt(DB_VERSION).catch((e) => {
+      // Newer code (e.g. a page loaded after `git pull`) already upgraded the database while this
+      // context still runs older code. Schema changes are additive, so open whatever version exists
+      // rather than failing every request until the extension is reloaded.
+      if (e?.name === 'VersionError') return openAt(undefined);
+      throw e;
+    }).catch((e) => { dbPromise = null; throw e; });
   }
   return dbPromise;
+}
+
+function openAt(version) {
+  return new Promise((resolve, reject) => {
+    const req = version === undefined ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version);
+    req.onupgradeneeded = (e) => {
+      const db = req.result;
+      if (e.oldVersion < 1) {
+        db.createObjectStore('feeds', { keyPath: 'id' });
+        db.createObjectStore('folders', { keyPath: 'id' });
+        const posts = db.createObjectStore('posts', { keyPath: 'id' });
+        posts.createIndex('feedId', 'feedId');
+        posts.createIndex('feedPublished', ['feedId', 'published']);
+        posts.createIndex('feedRead', ['feedId', 'read']);
+        posts.createIndex('read', 'read');
+        posts.createIndex('starred', 'starred');
+        db.createObjectStore('content', { keyPath: 'id' });
+      }
+      if (e.oldVersion < 2) {
+        const posts = req.transaction.objectStore('posts');
+        posts.createIndex('lkey', 'lkey');
+        posts.createIndex('tkey', 'tkey');
+        // Back-fill keys for posts stored before this version.
+        posts.openCursor().onsuccess = (ev) => {
+          const cursor = ev.target.result;
+          if (!cursor) return;
+          cursor.update(withDedupeKeys({ ...cursor.value }));
+          cursor.continue();
+        };
+      }
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      resolve(db);
+    };
+    req.onerror = () => reject(req.error);
+  });
 }
 
 const reqP = (req) => new Promise((resolve, reject) => {

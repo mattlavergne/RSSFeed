@@ -653,6 +653,86 @@ await step('unsubscribe removes the feed and its posts', async () => {
   assert.equal((await postsOf(id)).length, 0);
 });
 
+// Simulates `git pull` while the extension keeps running: install an older build, then replace its
+// files on disk without reloading. Returns helpers bound to that browser.
+async function withStaleInstall(patches, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tributary-stale-'));
+  const extCopy = path.join(dir, 'extension');
+  fs.cpSync(EXT, extCopy, { recursive: true });
+  for (const [file, from, to] of patches) {
+    const f = path.join(extCopy, file);
+    const src = fs.readFileSync(f, 'utf8');
+    assert.ok(src.includes(from), `patch target missing in ${file}: ${from}`);
+    fs.writeFileSync(f, src.replace(from, to));
+  }
+  const ctx2 = await chromium.launchPersistentContext(path.join(dir, 'profile'), {
+    channel: 'chromium', headless: !process.env.HEADED,
+    args: [`--disable-extensions-except=${extCopy}`, `--load-extension=${extCopy}`],
+  });
+  try {
+    let [sw2] = ctx2.serviceWorkers();
+    if (!sw2) sw2 = await ctx2.waitForEvent('serviceworker');
+    const id = new URL(sw2.url()).host;
+    const p1 = await ctx2.newPage();
+    await p1.goto(`chrome-extension://${id}/icons/icon16.png`);
+    const send2 = (pg, type, data = {}) => pg.evaluate(([t, d]) => chrome.runtime.sendMessage({ type: t, ...d }), [type, data]);
+    assert.equal((await send2(p1, 'subscribe', { url: `${B}/rss2.xml` })).ok, true, 'old build works before the pull');
+    fs.cpSync(EXT, extCopy, { recursive: true }); // "git pull", no reload
+    const p2 = await ctx2.newPage();
+    await p2.goto(`chrome-extension://${id}/options.html#feeds`); // new page code upgrades the database
+    await p2.waitForSelector('#feeds-body tr');
+    await fn({ page: p2, send: (type, data) => send2(p2, type, data) });
+  } finally {
+    await ctx2.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const OLD_DB = [
+  ['lib/db.js', 'const DB_VERSION = 2;', 'const DB_VERSION = 1;'],
+  ['lib/db.js', 'if (e.oldVersion < 2) {', 'if (false) {'],
+  ['lib/db.js', '        if (dedupe) {', '        if (false) {'], // old builds had no duplicate check
+  ['background.js', 'lastRefreshAt, codeVersion: CODE_VERSION };', 'lastRefreshAt };'],
+];
+
+await step('update without reloading (old build, like 1.1.0): pages show a "finish the update" banner', async () => {
+  await withStaleInstall([
+    ...OLD_DB,
+    ['lib/db.js', "if (e?.name === 'VersionError') return openAt(undefined);", ''],
+  ], async ({ page: p, send }) => {
+    await p.waitForSelector('.update-banner', { timeout: 5000 });
+    assert.match(await p.locator('.update-banner').innerText(), /reload/i);
+    if (wantShots) await p.screenshot({ path: path.join(SHOTS, 'update-banner.png') });
+    // This is the reported bug: the stale background can't open the upgraded database.
+    const r = await send('subscribe', { url: `${B}/atom.xml` });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /version/i);
+  });
+});
+
+await step('update without reloading (future builds): stale background keeps working on the upgraded database', async () => {
+  await withStaleInstall(OLD_DB, async ({ page: p, send }) => {
+    await p.waitForSelector('.update-banner', { timeout: 5000 });
+    const sub = await send('subscribe', { url: `${B}/atom.xml` });
+    assert.equal(sub.ok, true, sub.error);
+    const sync = await send('syncNow');
+    assert.equal(sync.ok, true, sync.error);
+    const titles = (await p.evaluate(async () => (await import('/lib/db.js')).getAllFeeds())).map((f) => f.title).sort();
+    assert.deepEqual(titles, ['Atom Example', 'Example & Co Blog'], JSON.stringify(titles));
+  });
+});
+
+await step('no update banner when the background is current', async () => {
+  const opts = await ctx.newPage();
+  await opts.goto(X('options.html#general'));
+  await opts.waitForSelector('#tab-general.active');
+  await sleep(500);
+  assert.equal(await opts.locator('.update-banner').count(), 0);
+  await opts.close();
+  await page.bringToFront();
+  assert.equal(await page.locator('.update-banner').count(), 0);
+});
+
 await step('no uncaught page errors', async () => {
   assert.deepEqual(pageErrors, []);
 });

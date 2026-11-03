@@ -55,7 +55,7 @@ That's it. It keeps working across browser restarts, and refreshes feeds in the 
 
 **Moving from another reader:** export OPML there, then Tributary → ⚙ Settings → *Import & export* → drop the file in.
 
-**Updating:** `git pull` (or download the ZIP again into the **same** folder), then click ↻ on Tributary's card in `chrome://extensions`. Your feeds and posts are kept.
+**Updating:** `git pull` (or download the ZIP again into the **same** folder), then click ↻ on Tributary's card in `chrome://extensions` — this step matters: until you reload, Chrome keeps running the old background code (which handles adding feeds, refreshing and sync). If you forget, Tributary shows a yellow *“Tributary was updated”* banner with a button to the extensions page. Your feeds and posts are kept.
 
 **Several computers:** install it the same way on each. The extension ID is pinned in `manifest.json` (`key`), so it's identical everywhere regardless of folder path — that's what lets *Settings → Sync* share your subscriptions, folders and rules through your Chrome profile. Read/unread state is per computer.
 

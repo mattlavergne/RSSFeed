@@ -180,3 +180,10 @@ test('assessFeeds: flags failing, inactive and noisy feeds', () => {
   assert.equal(rows.new.inactive, false, 'brand-new feeds are not inactive');
   assert.ok(Math.abs(rows.normal1.perWeek - 2.8) < 0.01);
 });
+
+test('CODE_VERSION matches manifest.json version (bump both together)', async () => {
+  const fs = await import('node:fs');
+  const { CODE_VERSION } = await import('../extension/lib/version.js');
+  const manifest = JSON.parse(fs.readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
+  assert.equal(CODE_VERSION, manifest.version);
+});

@@ -121,6 +121,12 @@ dialog .dlg-foot .spacer { flex: 1; }
 .small { font-size: 12px; }
 .error-text { color: var(--danger); }
 
+.update-banner {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px; flex: none;
+  background: var(--highlight); border-bottom: 1px solid var(--highlight-border); font-size: 13px; line-height: 1.4;
+}
+.update-banner span { flex: 1; }
+main > .update-banner { border: 1px solid var(--highlight-border); border-radius: 10px; margin-bottom: 16px; }
 #toast {
   position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(20px);
   background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px;

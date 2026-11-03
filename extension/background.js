@@ -6,6 +6,7 @@ import { applyRules } from './lib/rules.js';
 import { uid, postId, hash, normalizeUrl, pool, hostOf } from './lib/util.js';
 import { mergeSubscriptions, writeSyncPayload, readSyncPayload, SYNC_META_KEY } from './lib/sync.js';
 import { siteFeedCandidates } from './lib/sites.js';
+import { CODE_VERSION } from './lib/version.js';
 
 const READER_URL = chrome.runtime.getURL('reader.html');
 const MIN_INTERVAL = 1;            // minutes
@@ -679,7 +680,7 @@ const handlers = {
   },
   async getStatus() {
     const { lastRefreshAt = 0 } = await chrome.storage.local.get('lastRefreshAt');
-    return { running: !!refreshing, ...refreshProgress, lastRefreshAt };
+    return { running: !!refreshing, ...refreshProgress, lastRefreshAt, codeVersion: CODE_VERSION };
   },
   async discover({ url }) { return discover(url); },
   async subscribe(msg) { const r = await subscribe(msg); broadcast({ type: 'subscriptionsUpdated' }); return r; },

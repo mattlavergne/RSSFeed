@@ -5,6 +5,7 @@ import { getSettings, applyTheme, onSettingsChanged } from '../lib/settings.js';
 import { sanitizeHtml } from '../lib/sanitize.js';
 import { escapeHtml, timeAgo, formatDate, hostOf, debounce, uid, iconImg, attachIconFallbacks, displayUrl } from '../lib/util.js';
 import { icon, hydrateIcons } from './icons.js';
+import { isBackgroundStale, showUpdateBanner } from '../lib/version.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -1256,6 +1257,7 @@ async function handleHash() {
 
 async function init() {
   hydrateIcons();
+  isBackgroundStale().then((stale) => { if (stale) showUpdateBanner($('#app')); });
   state.settings = await getSettings();
   applyTheme(state.settings);
   state.filter = state.settings.unreadOnly ? 'unread' : 'all';

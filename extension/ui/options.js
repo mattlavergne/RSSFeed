@@ -3,6 +3,7 @@ import { getSettings, saveSettings, applyTheme, getRules, saveRules, DEFAULT_SET
 import { RULE_ACTIONS, RULE_FIELDS, RULE_OPS, validateRule, ruleMatches } from '../lib/rules.js';
 import { buildOpml } from '../lib/opml.js';
 import { assessFeeds } from '../lib/health.js';
+import { isBackgroundStale, showUpdateBanner } from '../lib/version.js';
 import { parseOpml } from '../lib/feedparse.js';
 import { escapeHtml, timeAgo, formatDate, downloadText, dateStamp, uid, postId, hash, hostOf, iconImg, attachIconFallbacks, displayUrl } from '../lib/util.js';
 
@@ -627,6 +628,7 @@ function bindMisc() {
 }
 
 async function init() {
+  isBackgroundStale().then((stale) => { if (stale) showUpdateBanner($('main')); });
   settings = await getSettings();
   applyTheme(settings);
   $('#version').textContent = `Version ${chrome.runtime.getManifest().version}`;
